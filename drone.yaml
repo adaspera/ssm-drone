@@ -1,0 +1,6 @@
+train: ./data/ARD-MAV/train/images
+val: ./data/ARD-MAV/val/images
+
+
+nc: 1
+names: ['drone']

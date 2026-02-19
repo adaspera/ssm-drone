@@ -1,0 +1,48 @@
+# yolo26-mamba-head-no-scale.yaml
+nc: 2
+end2end: True
+reg_max: 1
+# REMOVE scales to avoid automatic scaling
+# scales:
+#   n: [0.50, 0.25, 1024]
+
+backbone:
+  # No scaling - use exact values
+  - [-1, 1, Conv, [16, 3, 2]] # 0
+  - [-1, 1, Conv, [32, 3, 2]] # 1
+  - [-1, 1, C3k2, [64, False, 0.25]] # 2
+  - [-1, 1, Conv, [64, 3, 2]] # 3
+  - [-1, 1, C3k2, [128, False, 0.25]] # 4
+  - [-1, 1, Conv, [128, 3, 2]] # 5
+  - [-1, 1, C3k2, [128, True]] # 6
+  - [-1, 1, Conv, [256, 3, 2]] # 7
+  - [-1, 1, C3k2, [256, True]] # 8
+  - [-1, 1, SPPF, [256, 5, 3, True]] # 9
+  - [-1, 1, C2PSA, [256]] # 10
+
+head:
+  # P5 -> P4
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]] # 11
+  - [[-1, 6], 1, Concat, [1]] # 12 -> 384 channels (256+128)
+  - [-1, 1, Conv, [128, 1, 1]] # 13 Reduce 384->128
+  - [-1, 1, MambaBlock, [128, 128, 16, 2]] # 14-Mamba
+  
+  # P4 -> P3
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]] # 15
+  - [[-1, 4], 1, Concat, [1]] # 16 -> 256 channels (128+128)
+  - [-1, 1, Conv, [64, 1, 1]] # 17 Reduce 256->64
+  - [-1, 1, MambaBlock, [64, 64, 16, 2]] # 18-Mamba (P3/8-small)
+  
+  # P3 -> P4
+  - [-1, 1, Conv, [64, 3, 2]] # 19
+  - [[-1, 14], 1, Concat, [1]] # 20 -> 192 channels (64+128)
+  - [-1, 1, Conv, [128, 1, 1]] # 21 Reduce 192->128
+  - [-1, 1, MambaBlock, [128, 128, 16, 2]] # 22-Mamba (P4/16-medium)
+  
+  # P4 -> P5
+  - [-1, 1, Conv, [128, 3, 2]] # 23
+  - [[-1, 10], 1, Concat, [1]] # 24 -> 384 channels (128+256)
+  - [-1, 1, Conv, [256, 1, 1]] # 25 Reduce 384->256
+  - [-1, 1, MambaBlock, [256, 256, 16, 2]] # 26-Mamba (P5/32-large)
+
+  - [[18, 22, 26], 1, Detect, [nc]] # Detect(P3, P4, P5)

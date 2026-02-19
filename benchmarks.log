@@ -1,0 +1,122 @@
+
+Benchmarks complete for ./runs/detect/base-yolo26-naked/weights/best.pt on coco8.yaml at imgsz=640 (47.20s)
+Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - ❌️ Export failed
++------------------------------------------------------------------------------------------+
+|     Format     Status❔   Size (MB)   metrics/mAP50-95(B)   Inference time (ms/im)   FPS |
++==========================================================================================+
+| 1   TensorRT   ❌         0.0         -                     -                        -   |
++------------------------------------------------------------------------------------------+
+
+Benchmarks complete for ./runs/detect/base-yolo26-naked/weights/best.pt on coco8.yaml at imgsz=640 (3.38s)
+Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - ❌️ Export failed
++-------------------------------------------------------------------------------------------+
+|     Format    Status❔   Size (MB)   metrics/mAP50-95(B)   Inference time (ms/im)   FPS   |
++===========================================================================================+
+| 1   PyTorch   ✅         5.1         0.0                   35.52                    28.15 |
++-------------------------------------------------------------------------------------------+
+
+Benchmarks complete for ./runs/detect/base-yolo26-naked/weights/best.pt on coco8.yaml at imgsz=640 (2.63s)
+Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - ❌️ Export failed
++-------------------------------------------------------------------------------------------+
+|     Format   Status❔   Size (MB)   metrics/mAP50-95(B)   Inference time (ms/im)   FPS    |
++===========================================================================================+
+| 1   ONNX     ✅         9.4         0.0                   5.26                     189.92 |
++-------------------------------------------------------------------------------------------+
+
+Benchmarks complete for ./runs/detect/base-yolo26-naked/weights/best.pt on coco8.yaml at imgsz=640 (3.61s)
+Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - ❌️ Export failed
++-------------------------------------------------------------------------------------------+
+|     Format    Status❔   Size (MB)   metrics/mAP50-95(B)   Inference time (ms/im)   FPS   |
++===========================================================================================+
+| 1   PyTorch   ✅         5.1         0.0                   36.82                    27.16 |
++-------------------------------------------------------------------------------------------+
+
+Benchmarks complete for ./runs/detect/base-yolo26-naked/weights/best.pt on coco8.yaml at imgsz=640 (2.68s)
+Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - ❌️ Export failed
++-------------------------------------------------------------------------------------------+
+|     Format   Status❔   Size (MB)   metrics/mAP50-95(B)   Inference time (ms/im)   FPS    |
++===========================================================================================+
+| 1   ONNX     ✅         9.4         0.0                   5.34                     187.37 |
++-------------------------------------------------------------------------------------------+
+
+Benchmarks complete for ./runs/detect/base-yolo26-naked/weights/best.pt on data.yaml at imgsz=640 (11.11s)
+Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - ❌️ Export failed
++-------------------------------------------------------------------------------------------+
+|     Format    Status❔   Size (MB)   metrics/mAP50-95(B)   Inference time (ms/im)   FPS   |
++===========================================================================================+
+| 1   PyTorch   ✅         5.1         0.1731                7.73                     129.3 |
++-------------------------------------------------------------------------------------------+
+
+Benchmarks complete for ./runs/detect/base-yolo26-naked/weights/best.pt on data.yaml at imgsz=640 (8.10s)
+Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - ❌️ Export failed
++------------------------------------------------------------------------------------------+
+|     Format   Status❔   Size (MB)   metrics/mAP50-95(B)   Inference time (ms/im)   FPS   |
++==========================================================================================+
+| 1   ONNX     ✅         9.4         0.1712                4.67                     214.1 |
++------------------------------------------------------------------------------------------+
+
+Benchmarks complete for ./runs/detect/yolo26-mamba/weights/best.pt on data.yaml at imgsz=640 (14.36s)
+Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - ❌️ Export failed
++-------------------------------------------------------------------------------------------+
+|     Format    Status❔   Size (MB)   metrics/mAP50-95(B)   Inference time (ms/im)   FPS   |
++===========================================================================================+
+| 1   PyTorch   ✅         6.3         0.1853                12.32                    81.17 |
++-------------------------------------------------------------------------------------------+
+
+
+Benchmarks complete for ./runs/detect/yolo26-mamba-head/weights/best.pt on data.yaml at imgsz=640 (13.28s)
+Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - ❌️ Export failed
++-------------------------------------------------------------------------------------------+
+|     Format    Status❔   Size (MB)   metrics/mAP50-95(B)   Inference time (ms/im)   FPS   |
++===========================================================================================+
+| 1   PyTorch   ✅         5.4         0.1456                10.9                     91.75 |
++-------------------------------------------------------------------------------------------+
+
+
+Benchmarks complete for ./runs/detect/base-yolo26/weights/best.pt on data.yaml at imgsz=640 (11.66s)
+Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - ❌️ Export failed
++--------------------------------------------------------------------------------------------+
+|     Format    Status❔   Size (MB)   metrics/mAP50-95(B)   Inference time (ms/im)   FPS    |
++============================================================================================+
+| 1   PyTorch   ✅         5.1         0.2759                8.12                     123.12 |
++--------------------------------------------------------------------------------------------+
+
+Benchmarks complete for ./runs/detect/yolo26-mamba-backbone1/weights/best.pt on data.yaml at imgsz=640 (13.22s)
+Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - ❌️ Export failed
++--------------------------------------------------------------------------------------------+
+|     Format    Status❔   Size (MB)   metrics/mAP50-95(B)   Inference time (ms/im)   FPS    |
++============================================================================================+
+| 1   PyTorch   ✅         5.9         0.1406                9.95                     100.49 |
++--------------------------------------------------------------------------------------------+
+
+Benchmarks complete for ./runs/detect/yolo26-v-mamba-data7/weights/best.pt on data.yaml at imgsz=640 (22.00s)
+Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - ❌️ Export failed
++-------------------------------------------------------------------------------------------+
+|     Format    Status❔   Size (MB)   metrics/mAP50-95(B)   Inference time (ms/im)   FPS   |
++===========================================================================================+
+| 1   PyTorch   ✅         6.4         0.1119                22.28                    44.87 |
++-------------------------------------------------------------------------------------------+
+
+Benchmarks complete for ./runs/detect/yolo26-v-mamba-data8/weights/best.pt on data.yaml at imgsz=640 (15.60s)
+Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - ❌️ Export failed
++-------------------------------------------------------------------------------------------+
+|     Format    Status❔   Size (MB)   metrics/mAP50-95(B)   Inference time (ms/im)   FPS   |
++===========================================================================================+
+| 1   PyTorch   ✅         6.4         0.1386                13.95                    71.67 |
++-------------------------------------------------------------------------------------------+
+
+Benchmarks complete for ./runs/detect/yolo26-v-mamba-data18/weights/best.pt on data.yaml at imgsz=640 (18.79s)
+Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - ❌️ Export failed
++------------------------------------------------------------------------------------------+
+|     Format    Status❔   Size (MB)   metrics/mAP50-95(B)   Inference time (ms/im)   FPS  |
++==========================================================================================+
+| 1   PyTorch   ✅         8.3         0.196                 18.25                    54.8 |
++------------------------------------------------------------------------------------------+
+
+Benchmarks complete for ./runs/detect/yolo26-v-mamba-noC3k2-data/weights/best.pt on data.yaml at imgsz=640 (15.84s)
+Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - ❌️ Export failed
++-------------------------------------------------------------------------------------------+
+|     Format    Status❔   Size (MB)   metrics/mAP50-95(B)   Inference time (ms/im)   FPS   |
++===========================================================================================+
+| 1   PyTorch   ✅         7.1         0.1554                14.83                    67.43 |
++-------------------------------------------------------------------------------------------+

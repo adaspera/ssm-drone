@@ -1,0 +1,12 @@
+
+nc: 2
+end2end: True
+reg_max: 1
+
+backbone:
+  # VMamba backbone returns list [P2(128ch, stride-8), P3(256ch, stride-16), P4(512ch, stride-32)]
+  - [-1, 1, VMambaBackbone, []]  # 0
+
+head:
+  # Use custom VMambaDetect that handles list input from backbone
+  - [-1, 1, VMambaDetect, [nc]]
