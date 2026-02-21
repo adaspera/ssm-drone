@@ -3,7 +3,7 @@ import mamba_registry  # This registers everything
 from ultralytics import YOLO
 import torch
 
-MODEL_NAME = "yolo26-v-mamba"
+MODEL_NAME = "yolo26-v-mamba-backbone"
 DATA = "data"
 
 def benchmark():
