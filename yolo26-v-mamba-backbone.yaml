@@ -1,12 +1,27 @@
-
 nc: 2
 end2end: True
 reg_max: 1
 
 backbone:
-  # VMamba backbone returns list [P2(128ch, stride-8), P3(256ch, stride-16), P4(512ch, stride-32)]
-  - [-1, 1, VMambaBackbone, []]  # 0
+  - [-1, 1, VMambaBackbone, []]  # 0: outputs [P2(128), P3(256), P4(512)]
 
 head:
-  # Use custom VMambaDetect that handles list input from backbone
-  - [-1, 1, VMambaDetect, [nc]]
+  # Extract individual features from backbone list 
+  - [0, 1, Index, [64, 0]]  # 1: P2 stride-8 (64ch)
+  - [0, 1, Index, [128, 1]]  # 2: P3 stride-16 (128ch)
+  - [0, 1, Index, [256, 2]]  # 3: P4 stride-32 (256ch)
+  
+  # Neck: upsample and fuse
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]  # 4
+  - [[-1, 2], 1, Concat, [1]]  # 5: concat P4_up + P3
+  - [-1, 1, C3k2, [128, True]]  # 6
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]  # 7
+  - [[-1, 1], 1, Concat, [1]]  # 8: concat P3_up + P2
+  - [-1, 1, C3k2, [64, True]]  # 9: P3/8-small
+  - [-1, 1, Conv, [64, 3, 2]]  # 10
+  - [[-1, 6], 1, Concat, [1]]  # 11: concat P3_down + P4
+  - [-1, 1, C3k2, [128, True]]  # 12: P4/16-medium
+  - [-1, 1, Conv, [128, 3, 2]]  # 13
+  - [[-1, 3], 1, Concat, [1]]  # 14: concat P4_down + P5
+  - [-1, 1, C3k2, [256, True, 0.5, True]]  # 15: P5/32-large
+  - [[9, 12, 15], 1, Detect, [nc]]  # 16: Detection

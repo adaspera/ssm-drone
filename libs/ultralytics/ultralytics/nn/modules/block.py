@@ -54,6 +54,7 @@ __all__ = (
     "TorchVision",
 )
 
+# from ultralytics.nn.modules.custom.vmamba_backbone import VMambaBackbone
 
 class DFL(nn.Module):
     """Integral module of Distribution Focal Loss (DFL).

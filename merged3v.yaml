@@ -1,0 +1,6 @@
+train: ./data/mergedv3/train/images
+val: ./data/mergedv3/val/images
+
+nc: 1
+names:
+- drone
