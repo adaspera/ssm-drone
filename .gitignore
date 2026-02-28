@@ -1,7 +1,7 @@
 __pycache__/
 .vscode/
 .github/
-data/
+/data/
 
 runs/
 pretrained/
