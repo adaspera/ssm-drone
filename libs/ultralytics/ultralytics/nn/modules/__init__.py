@@ -107,7 +107,13 @@ from .transformer import (
     TransformerLayer,
 )
 
+from .wang2024_mamba_yolo import Wang2024SimpleStem, Wang2024VisionClueMerge, Wang2024VSSBlock, Wang2024XSSBlock
+
 __all__ = (
+    Wang2024SimpleStem,
+    Wang2024VisionClueMerge,
+    Wang2024VSSBlock,
+    Wang2024XSSBlock,
     "AIFI",
     "C1",
     "C2",

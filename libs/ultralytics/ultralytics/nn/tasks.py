@@ -13,6 +13,10 @@ import torch.nn as nn
 from ultralytics.nn.autobackend import check_class_names
 from ultralytics.nn.modules import (
     # VMambaBackbone,
+    Wang2024SimpleStem,
+    Wang2024VisionClueMerge,
+    Wang2024VSSBlock,
+    Wang2024XSSBlock,
     AIFI,
     C1,
     C2,
@@ -1569,6 +1573,7 @@ def parse_model(d, ch, verbose=True):
     layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
     base_modules = frozenset(
         {
+            Wang2024SimpleStem, Wang2024VisionClueMerge, Wang2024VSSBlock, Wang2024XSSBlock,
             Classify,
             Conv,
             ConvTranspose,
@@ -1661,11 +1666,6 @@ def parse_model(d, ch, verbose=True):
                 legacy = False
         elif m is AIFI:
             args = [ch[f], *args]
-        elif m is VMambaBackbone:
-            # VMambaBackbone returns [P2(128ch), P3(256ch), P4(512ch)]
-            # Store all three output channels as a list for Index modules to access
-            c2 = [128, 256, 512]
-            args = []
         elif m in frozenset({HGStem, HGBlock}):
             c1, cm, c2 = ch[f], args[0], args[1]
             args = [c1, cm, c2, *args[2:]]

@@ -121,3 +121,36 @@ Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - 
 +===========================================================================================+
 | 1   PyTorch   ✅         8.3         0.159                 15.03                    66.51 |
 +-------------------------------------------------------------------------------------------+
+
+????????????????????????? - onnx issue, pytorch shows 0.5115
+Benchmarks complete for ./pretrained/yolo26-v-mamba-pure-merged3v/weights/best.pt on merged3v.yaml at imgsz=640 (36.51s)
+Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - ❌️ Export failed
++-------------------------------------------------------------------------------------------+
+|     Format   Status❔   Size (MB)   metrics/mAP50-95(B)   Inference time (ms/im)   FPS    |
++===========================================================================================+
+| 1   ONNX     ✅         17.3        0.2892                4.84                     206.51 |
++-------------------------------------------------------------------------------------------+
+
+Benchmarks complete for ./pretrained/yolo26-v-mamba-merged3v/weights/best.pt on merged3v.yaml at imgsz=640 (37.66s)
+Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - ❌️ Export failed
++-------------------------------------------------------------------------------------------+
+|     Format   Status❔   Size (MB)   metrics/mAP50-95(B)   Inference time (ms/im)   FPS    |
++===========================================================================================+
+| 1   ONNX     ✅         12.1        0.5048                5.21                     191.79 |
++-------------------------------------------------------------------------------------------+
+
+Benchmarks complete for .---- /pretrained/yolo26n-merged3v/weights/best.pt on merged3v.yaml at imgsz=640 (34.95s)
+Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - ❌️ Export failed
++-------------------------------------------------------------------------------------------+
+|     Format   Status❔   Size (MB)   metrics/mAP50-95(B)   Inference time (ms/im)   FPS    |
++===========================================================================================+
+| 1   ONNX     ✅         9.4         0.5472                4.79                     208.79 |
++-------------------------------------------------------------------------------------------+
+
+Benchmarks complete for ./pretrained/yolo26s-merged3v/weights/best.pt on merged3v.yaml at imgsz=640 (47.48s)
+Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - ❌️ Export failed
++-------------------------------------------------------------------------------------------+
+|     Format   Status❔   Size (MB)   metrics/mAP50-95(B)   Inference time (ms/im)   FPS    |
++===========================================================================================+
+| 1   ONNX     ✅         36.4        0.5981                8.4                      119.04 |
++-------------------------------------------------------------------------------------------+
