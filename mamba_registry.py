@@ -8,11 +8,12 @@ import sys
 sys.path.append('./libs/VMamba')  # Add VMamba to path
 
 import vmamba
-from vmamba import VSSM, VSSBlock
+from vmamba import VSSBlock, VSSBlock_Mamba2
 
 from mamba_block import Mamba2DStable
 from vmamba_block import VMamba2DBlock
 from mamba3_block import VMamba3BlockVSSM
+from mamba_ssm import Mamba2
 
 class MambaBlock(nn.Module):
     def __init__(self, *args, **kwargs):
@@ -108,6 +109,57 @@ class VSSMBlock(nn.Module):
         device = x.device
         x = self.block(x.to('cuda'))
         return x.to(device)  # Ensure output is on same device as input
+    
+
+class VSSMBlock_Mamba2(nn.Module):
+    """Wrapper around VMamba's VSSBlock_Mamba2 for YOLO integration (channel-first).
+    YAML args: [dim, d_state, ssm_ratio, d_conv, headdim, chunk_size, ngroups]
+      dim        : input/output channel count (set by YOLO from previous layer)
+      d_state    : SSM state size (default 64, Mamba2 recommended)
+      ssm_ratio  : expansion ratio for d_inner (default 2.0)
+      d_conv     : depthwise conv kernel size (default 3)
+      headdim    : head dimension inside SSD — d_inner must be divisible (default 64)
+      chunk_size : SSD chunk length for parallel scan (default 256)
+      ngroups    : number of B/C groups shared across heads (default 1)
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+
+        if len(args) >= 1:
+            dim        = args[0]
+            d_state    = args[1] if len(args) > 1 else 64
+            ssm_ratio  = args[2] if len(args) > 2 else 2.0
+            d_conv     = args[3] if len(args) > 3 else 3
+            headdim    = args[4] if len(args) > 4 else 64
+            chunk_size = args[5] if len(args) > 5 else 256
+            ngroups    = args[6] if len(args) > 6 else 1
+        else:
+            raise Exception("VSSMBlock_Mamba2 requires at least dim argument")
+
+        # Validate headdim divides d_inner
+        d_inner = int(ssm_ratio * dim)
+        assert d_inner % headdim == 0, (
+            f"VSSMBlock_Mamba2: d_inner ({d_inner}) must be divisible by headdim ({headdim}). "
+            f"Try headdim={d_inner // max(1, d_inner // headdim)} or adjust ssm_ratio."
+        )
+
+        self.block = VSSBlock_Mamba2(
+            hidden_dim=dim,
+            channel_first=True,      # YOLO uses (B, C, H, W)
+            ssm_d_state=d_state,
+            ssm_ratio=ssm_ratio,
+            ssm_conv=d_conv,
+            forward_type="ssd",      # Mamba2 SSD kernel
+            ssm_headdim=headdim,
+            ssm_ngroups=ngroups,
+            ssm_chunk_size=chunk_size,
+            ssm_rmsnorm=True,
+        ).to('cuda')
+
+    def forward(self, x):
+        device = x.device
+        x = self.block(x.to('cuda'))
+        return x.to(device)
 
 
 class VMambaBlock2Way(nn.Module):
@@ -181,6 +233,7 @@ def mamba_parse_model(d, ch, verbose=True):
     original_globals['VMambaBlock2Way'] = VMambaBlock2Way
     original_globals['VSSMBlock'] = VSSMBlock
     original_globals['VMamba3Block'] = VMamba3Block
+    original_globals['VSSMBlock_Mamba2'] = VSSMBlock_Mamba2
     
     try:
         return _original_parse_model(d, ch, verbose)
@@ -196,3 +249,4 @@ modules.VMambaBlock = VMambaBlock
 modules.VMambaBlock2Way = VMambaBlock2Way
 modules.VSSMBlock = VSSMBlock
 modules.VMamba3Block = VMamba3Block
+modules.VSSMBlock_Mamba2 = VSSMBlock_Mamba2

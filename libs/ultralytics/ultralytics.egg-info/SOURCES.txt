@@ -131,6 +131,7 @@ ultralytics/cfg/models/v9/yolov9e.yaml
 ultralytics/cfg/models/v9/yolov9m.yaml
 ultralytics/cfg/models/v9/yolov9s.yaml
 ultralytics/cfg/models/v9/yolov9t.yaml
+ultralytics/cfg/models/wang2024-mamba-yolo/wang2024-Mamba-YOLO-T.yaml
 ultralytics/cfg/trackers/botsort.yaml
 ultralytics/cfg/trackers/bytetrack.yaml
 ultralytics/data/__init__.py
@@ -246,6 +247,9 @@ ultralytics/nn/modules/conv.py
 ultralytics/nn/modules/head.py
 ultralytics/nn/modules/transformer.py
 ultralytics/nn/modules/utils.py
+ultralytics/nn/modules/wang2024_common_utils_mbyolo.py
+ultralytics/nn/modules/wang2024_mamba_yolo.py
+ultralytics/nn/modules/custom/vmamba_backbone.py
 ultralytics/optim/__init__.py
 ultralytics/optim/muon.py
 ultralytics/solutions/__init__.py

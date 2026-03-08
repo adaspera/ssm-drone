@@ -11,7 +11,7 @@ cd /run/media/justas/Windows/Users/jusci/My\ Documents/Justo/VU/Bakis/
 
 conda activate mamba-env
 
-source "./venvlx/bin/activate"
+source "./venv/bin/activate"
 
 python train.py
 

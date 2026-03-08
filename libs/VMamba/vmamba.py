@@ -787,6 +787,12 @@ try:
 except ImportError:
     WITH_SELECTIVESCAN_MAMBA = False
 
+WITH_MAMBA2_SSD = True
+try:
+    from mamba_ssm.ops.triton.ssd_combined import mamba_chunk_scan_combined
+except ImportError:
+    raise ImportError("YOU ARE CRYNGE, mamba_ssm is required for selective scan with mamba backend. Please install mamba_ssm")
+
 
 def selective_scan_torch(
     u: torch.Tensor, # (B, K * C, L)
@@ -1646,7 +1652,226 @@ class SS2Dv2:
         return ret, value
 
 
-class SS2D(nn.Module, SS2Dv0, SS2Dv2):
+# =====================================================
+class SS2Dv_Mamba2:
+    """SS2D variant using Mamba2's SSD kernel (mamba_chunk_scan_combined) with VMamba's
+    4-direction cross-scan for 2D spatial feature maps.
+
+    Key differences from SS2Dv2:
+      - A_log : (K * nheads,)            — scalar per head, not a (D, N) matrix
+      - dt_bias: (K * nheads,)           — direct bias; no dt_rank intermediate projection
+      - D      : (K * nheads,)           — skip parameter per head
+      - x_proj projects to [dt, B, C]   — dt is (nheads,) per direction
+      - SSD chunked-parallel scan        — faster on long sequences than recurrent scan
+      - Optional RMSNormGated output     — matches Mamba2's gated normalisation
+
+    Use via forward_type="ssd" (or "ssd_noz", "ssd_nozact", etc.).
+    """
+
+    def __initm2__(
+        self,
+        # basic dims ===========
+        d_model=96,
+        d_state=64,          # Mamba2 default (vs 16 in Mamba1)
+        ssm_ratio=2.0,
+        act_layer=nn.SiLU,
+        # dwconv ===============
+        d_conv=3,            # < 2 means no conv
+        conv_bias=True,
+        # ======================
+        dropout=0.0,
+        bias=False,
+        # dt init ==============
+        dt_min=0.001,
+        dt_max=0.1,
+        dt_init_floor=1e-4,
+        # Mamba2-specific ======
+        headdim=64,          # d_inner must be divisible by headdim
+        ngroups=1,           # number of B/C groups (shared across heads)
+        chunk_size=256,      # SSD chunk length
+        rmsnorm=True,        # use RMSNormGated on output (like Mamba2)
+        # ======================
+        forward_type="ssd",
+        channel_first=False,
+        # ======================
+        **kwargs,
+    ):
+        super().__init__()
+        self.k_group = 4
+        self.d_model = int(d_model)
+        self.d_state = int(d_state)
+        self.d_inner = int(ssm_ratio * d_model)
+        self.headdim = headdim
+        self.ngroups = ngroups
+        self.chunk_size = chunk_size
+        self.channel_first = channel_first
+        self.with_dconv = d_conv > 1
+        self.forward = self.forward_mamba2
+
+        assert self.d_inner % headdim == 0, (
+            f"d_inner ({self.d_inner}) must be divisible by headdim ({headdim})"
+        )
+        self.nheads = self.d_inner // headdim  # per scan direction
+
+        # Reuse SS2Dv2 postfix helpers for forward_type modifiers
+        checkpostfix = SS2Dv2.checkpostfix
+        self.disable_z, forward_type      = checkpostfix("_noz",    forward_type)
+        self.disable_z_act, forward_type  = checkpostfix("_nozact", forward_type)
+        self.out_norm, forward_type       = SS2Dv2.get_outnorm(forward_type, self.d_inner, channel_first)
+
+        # ---- in_proj: d_model → d_inner [+ d_inner for z gate] ----
+        d_proj = self.d_inner if self.disable_z else self.d_inner * 2
+        self.in_proj = Linear(self.d_model, d_proj, bias=bias, channel_first=channel_first)
+        self.act = act_layer()
+
+        # ---- 2D depthwise conv (channel-first) ----
+        if self.with_dconv:
+            self.conv2d = nn.Conv2d(
+                in_channels=self.d_inner,
+                out_channels=self.d_inner,
+                groups=self.d_inner,
+                bias=conv_bias,
+                kernel_size=d_conv,
+                padding=(d_conv - 1) // 2,
+            )
+
+        # ---- x_proj: d_inner → [dt(nheads), B(ngroups*d_state), C(ngroups*d_state)] ----
+        # Grouped projection across all 4 directions at once (channel_first=True input)
+        self._proj_dim = self.nheads + 2 * self.ngroups * self.d_state
+        self.x_proj = Linear(
+            self.d_inner, self.k_group * self._proj_dim,
+            groups=self.k_group, bias=False, channel_first=True,
+        )
+
+        # ---- A_log: (K * nheads,) — scalar decay per head per direction ----
+        A = torch.empty(self.k_group * self.nheads).uniform_(1, 16)
+        self.A_log = nn.Parameter(torch.log(A).to(torch.float32))
+        self.A_log._no_weight_decay = True
+
+        # ---- dt_bias: (K * nheads,) — direct softplus bias, no dt_rank projection ----
+        dt = torch.exp(
+            torch.rand(self.k_group * self.nheads) * (math.log(dt_max) - math.log(dt_min))
+            + math.log(dt_min)
+        ).clamp(min=dt_init_floor)
+        self.dt_bias = nn.Parameter(dt + torch.log(-torch.expm1(-dt)))
+        self.dt_bias._no_weight_decay = True
+
+        # ---- D skip parameter: (K * nheads,) ----
+        self.D = nn.Parameter(torch.ones(self.k_group * self.nheads))
+        self.D._no_weight_decay = True
+
+        # ---- Optional RMSNormGated (like Mamba2, requires z gate) ----
+        self._use_rmsnorm_gated = False
+        if rmsnorm and not self.disable_z:
+            from mamba_ssm.ops.triton.layernorm_gated import RMSNorm as RMSNormGated
+            self.norm_ssm = RMSNormGated(
+                self.d_inner, eps=1e-5, norm_before_gate=False,
+                group_size=self.d_inner // max(ngroups, 1),
+            )
+            self._use_rmsnorm_gated = True
+
+        # ---- out_proj ----
+        self.out_proj = Linear(self.d_inner, self.d_model, bias=bias, channel_first=channel_first)
+        self.dropout = nn.Dropout(dropout) if dropout > 0. else nn.Identity()
+
+    def forward_core_mamba2(self, x: torch.Tensor, scan_mode=0):
+        """
+        x: (B, d_inner, H, W)  channel-first
+        Returns: (B, d_inner, H, W)
+        """
+        assert WITH_MAMBA2_SSD, "mamba_ssm is not installed. Install it to use forward_type='ssd*'."
+        B, D, H, W = x.shape
+        L = H * W
+        K = self.k_group
+        nheads = self.nheads
+        P = self._proj_dim          # nheads + 2*ngroups*d_state
+        n_bc = self.ngroups * self.d_state
+
+        # 1. Cross-scan → (B, K*D, L)
+        xs = cross_scan_fn(x, in_channel_first=True, out_channel_first=True,
+                           scans=scan_mode)
+
+        # 2. Project → (B, K, P, L), split dt / B_ssm / C_ssm
+        xp = self.x_proj(xs.view(B, -1, L)).view(B, K, P, L)
+        dts = xp[:, :, :nheads, :]               # (B, K, nheads, L)
+        Bs  = xp[:, :, nheads:nheads + n_bc, :]  # (B, K, ngroups*d_state, L)
+        Cs  = xp[:, :, nheads + n_bc:, :]        # (B, K, ngroups*d_state, L)
+
+        A = -torch.exp(self.A_log.float())        # (K * nheads,)
+        xs_4d = xs.view(B, K, D, L)              # (B, K, D, L)
+
+        # 3. SSM kernel per scan direction
+        ys_list = []
+        for k in range(K):
+            x_k  = xs_4d[:, k].permute(0, 2, 1).view(B, L, nheads, self.headdim)  # (B, L, nheads, headdim)
+            dt_k = dts[:, k].permute(0, 2, 1).contiguous()                          # (B, L, nheads)
+            B_k  = Bs[:, k].permute(0, 2, 1).view(B, L, self.ngroups, self.d_state).contiguous()
+            C_k  = Cs[:, k].permute(0, 2, 1).view(B, L, self.ngroups, self.d_state).contiguous()
+            A_k       = A[k * nheads:(k + 1) * nheads]
+            D_k       = self.D[k * nheads:(k + 1) * nheads].float()
+            dt_bias_k = self.dt_bias[k * nheads:(k + 1) * nheads].float()
+
+            y_k = mamba_chunk_scan_combined(
+                    x_k, dt_k, A_k, B_k, C_k,
+                    chunk_size=self.chunk_size,
+                    D=D_k,
+                    z=None,
+                    dt_bias=dt_bias_k,
+                    dt_softplus=True,
+                )  # (B, L, nheads, headdim)
+
+            ys_list.append(y_k.reshape(B, L, D).permute(0, 2, 1))  # (B, D, L)
+
+        # 4. Cross-merge: (B, K, D, H, W) → (B, D, H, W)
+        ys = torch.stack(ys_list, dim=1).view(B, K, D, H, W)
+        y = cross_merge_fn(ys, in_channel_first=True, out_channel_first=True,
+                           scans=scan_mode)
+        return y.view(B, D, H, W)
+
+    def forward_mamba2(self, x: torch.Tensor, **kwargs):
+        x = self.in_proj(x)
+
+        if not self.disable_z:
+            x, z = x.chunk(2, dim=(1 if self.channel_first else -1))
+            x, z = x.contiguous(), z.contiguous()
+            if not self.disable_z_act:
+                z = self.act(z)
+
+        if not self.channel_first:
+            x = x.permute(0, 3, 1, 2).contiguous()
+        if self.with_dconv:
+            x = self.conv2d(x)
+        x = self.act(x)
+
+        y = self.forward_core_mamba2(x)  # (B, d_inner, H, W)
+
+        if not self.channel_first:
+            y = y.permute(0, 2, 3, 1).contiguous()
+
+        if self._use_rmsnorm_gated and not self.disable_z:
+            # RMSNormGated expects (B, L, d_inner) inputs.
+            if self.channel_first:
+                _B, _D, _H, _W = y.shape
+                y_flat = y.permute(0, 2, 3, 1).reshape(_B, _H * _W, _D)
+                z_flat = z.permute(0, 2, 3, 1).reshape(_B, _H * _W, _D)
+            else:
+                _sh = y.shape
+                y_flat = y.reshape(_sh[0], -1, _sh[-1])
+                z_flat = z.reshape(_sh[0], -1, _sh[-1])
+
+            y_flat = self.norm_ssm(y_flat, z_flat)
+
+            y = y_flat.reshape_as(y)
+        else:
+            _norm_dtype = self.out_norm.weight.dtype if hasattr(self.out_norm, 'weight') else y.dtype
+            y = self.out_norm(y.to(_norm_dtype)).to(y.dtype)
+            if not self.disable_z:
+                y = y * z
+
+        return self.dropout(self.out_proj(y))
+
+
+class SS2D(nn.Module, SS2Dv0, SS2Dv2, SS2Dv_Mamba2):
     def __init__(
         self,
         # basic dims ===========
@@ -1671,6 +1896,11 @@ class SS2D(nn.Module, SS2Dv0, SS2Dv2):
         # ======================
         forward_type="v2",
         channel_first=False,
+        # Mamba2/SSD-specific (only used when forward_type starts with 'ssd') ===
+        headdim=64,
+        ngroups=1,
+        chunk_size=256,
+        rmsnorm=True,
         # ======================
         **kwargs,
     ):
@@ -1685,6 +1915,22 @@ class SS2D(nn.Module, SS2Dv0, SS2Dv2):
             self.__initv0__(seq=("seq" in forward_type), **kwargs)
         elif forward_type.startswith("xv"):
             self.__initxv__(**kwargs)
+        elif forward_type.startswith("ssd"):
+            # Mamba2 SSD kernel with cross-scan
+            self.__initm2__(
+                d_model=d_model, d_state=d_state, ssm_ratio=ssm_ratio,
+                act_layer=act_layer, d_conv=d_conv, conv_bias=conv_bias,
+                dropout=dropout, bias=bias, dt_min=dt_min, dt_max=dt_max,
+                dt_init_floor=dt_init_floor, headdim=headdim, ngroups=ngroups,
+                chunk_size=chunk_size, rmsnorm=rmsnorm,
+                forward_type=forward_type, channel_first=channel_first,
+                **{k: v for k, v in kwargs.items() if k not in (
+                    'd_model','d_state','ssm_ratio','dt_rank','act_layer',
+                    'd_conv','conv_bias','dropout','bias','dt_min','dt_max',
+                    'dt_init','dt_scale','dt_init_floor','initialize',
+                    'forward_type','channel_first',
+                )},
+            )
         elif forward_type.startswith("m"):
             self.__initm0__(**kwargs)
         else:
@@ -1794,6 +2040,107 @@ class VSSBlock(nn.Module):
         else:
             return self._forward(input)
 
+
+class VSSBlock_Mamba2(nn.Module):
+    """VSSBlock variant that uses the Mamba2 SSD kernel via SS2D(forward_type='ssd*').
+
+    Drop-in replacement for VSSBlock — same residual + MLP structure, but the
+    SSM op is backed by mamba_chunk_scan_combined with VMamba's 4-direction cross-scan.
+
+    Extra parameters (Mamba2-specific):
+        ssm_headdim  : head dimension inside SSD (d_inner must be divisible by this)
+        ssm_ngroups  : number of B/C groups shared across heads
+        ssm_chunk_size: chunk length for the parallel SSD scan
+        ssm_rmsnorm  : use RMSNormGated on SSM output (requires mamba_ssm)
+        forward_type : any "ssd*" string, e.g. "ssd", "ssd_noz", "ssd_nozact",
+                       plus the usual outnorm postfixes ("_onnone", "_ondwconv3", …)
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int = 0,
+        drop_path: float = 0,
+        channel_first=False,
+        # =============================
+        ssm_d_state: int = 64,        # Mamba2 default (larger than Mamba1's 16)
+        ssm_ratio=2.0,
+        ssm_act_layer=nn.SiLU,
+        ssm_conv: int = 3,
+        ssm_conv_bias=True,
+        ssm_drop_rate: float = 0,
+        forward_type="ssd",
+        # Mamba2-specific ==============
+        ssm_headdim: int = 64,
+        ssm_ngroups: int = 1,
+        ssm_chunk_size: int = 256,
+        ssm_rmsnorm: bool = True,
+        # =============================
+        mlp_ratio=4.0,
+        mlp_act_layer=nn.GELU,
+        mlp_drop_rate: float = 0.0,
+        # =============================
+        use_checkpoint: bool = False,
+        post_norm: bool = False,
+        # =============================
+        **kwargs,
+    ):
+        super().__init__()
+        assert forward_type.startswith("ssd"), (
+            f"VSSBlock_Mamba2 requires forward_type starting with 'ssd', got '{forward_type}'"
+        )
+        self.ssm_branch = ssm_ratio > 0
+        self.mlp_branch = mlp_ratio > 0
+        self.use_checkpoint = use_checkpoint
+        self.post_norm = post_norm
+
+        if self.ssm_branch:
+            self.norm = LayerNorm(hidden_dim, channel_first=channel_first)
+            self.op = SS2D(
+                d_model=hidden_dim,
+                d_state=ssm_d_state,
+                ssm_ratio=ssm_ratio,
+                act_layer=ssm_act_layer,
+                d_conv=ssm_conv,
+                conv_bias=ssm_conv_bias,
+                dropout=ssm_drop_rate,
+                forward_type=forward_type,
+                channel_first=channel_first,
+                # Mamba2-specific
+                headdim=ssm_headdim,
+                ngroups=ssm_ngroups,
+                chunk_size=ssm_chunk_size,
+                rmsnorm=ssm_rmsnorm,
+            )
+
+        self.drop_path = DropPath(drop_path)
+
+        if self.mlp_branch:
+            self.norm2 = LayerNorm(hidden_dim, channel_first=channel_first)
+            mlp_hidden_dim = int(hidden_dim * mlp_ratio)
+            self.mlp = Mlp(
+                in_features=hidden_dim, hidden_features=mlp_hidden_dim,
+                act_layer=mlp_act_layer, drop=mlp_drop_rate, channel_first=channel_first,
+            )
+
+    def _forward(self, input: torch.Tensor):
+        x = input
+        if self.ssm_branch:
+            if self.post_norm:
+                x = x + self.drop_path(self.norm(self.op(x)))
+            else:
+                x = x + self.drop_path(self.op(self.norm(x)))
+        if self.mlp_branch:
+            if self.post_norm:
+                x = x + self.drop_path(self.norm2(self.mlp(x)))
+            else:
+                x = x + self.drop_path(self.mlp(self.norm2(x)))
+        return x
+
+    def forward(self, input: torch.Tensor):
+        if self.use_checkpoint:
+            return checkpoint.checkpoint(self._forward, input)
+        else:
+            return self._forward(input)
 
 
 class VSSM(nn.Module):
