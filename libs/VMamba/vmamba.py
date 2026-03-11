@@ -1774,6 +1774,7 @@ class SS2Dv_Mamba2:
         self.out_proj = Linear(self.d_inner, self.d_model, bias=bias, channel_first=channel_first)
         self.dropout = nn.Dropout(dropout) if dropout > 0. else nn.Identity()
 
+    # TODO REMOVE ALL OPTIONS
     def forward_core_mamba2(self, x: torch.Tensor, scan_mode=0):
         """
         x: (B, d_inner, H, W)  channel-first
@@ -1800,30 +1801,25 @@ class SS2Dv_Mamba2:
         A = -torch.exp(self.A_log.float())        # (K * nheads,)
         xs_4d = xs.view(B, K, D, L)              # (B, K, D, L)
 
-        # 3. SSM kernel per scan direction
-        ys_list = []
-        for k in range(K):
-            x_k  = xs_4d[:, k].permute(0, 2, 1).view(B, L, nheads, self.headdim)  # (B, L, nheads, headdim)
-            dt_k = dts[:, k].permute(0, 2, 1).contiguous()                          # (B, L, nheads)
-            B_k  = Bs[:, k].permute(0, 2, 1).view(B, L, self.ngroups, self.d_state).contiguous()
-            C_k  = Cs[:, k].permute(0, 2, 1).view(B, L, self.ngroups, self.d_state).contiguous()
-            A_k       = A[k * nheads:(k + 1) * nheads]
-            D_k       = self.D[k * nheads:(k + 1) * nheads].float()
-            dt_bias_k = self.dt_bias[k * nheads:(k + 1) * nheads].float()
+        # 3. Fused SSM kernel: all K directions as K*nheads heads in one call.
+        # The kernel treats every head independently, so directions never interact.
+        # B/C are stacked as K*ngroups groups → heads_per_group = nheads/ngroups unchanged.
+        x_all  = xs_4d.view(B, K, nheads, self.headdim, L).permute(0, 4, 1, 2, 3).reshape(B, L, K * nheads, self.headdim).contiguous()   # (B, L, K*nheads, headdim)
+        dt_all = dts.permute(0, 3, 1, 2).reshape(B, L, K * nheads).contiguous()                                                           # (B, L, K*nheads)
+        B_all  = Bs.view(B, K, self.ngroups, self.d_state, L).permute(0, 4, 1, 2, 3).reshape(B, L, K * self.ngroups, self.d_state).contiguous()  # (B, L, K*ngroups, d_state)
+        C_all  = Cs.view(B, K, self.ngroups, self.d_state, L).permute(0, 4, 1, 2, 3).reshape(B, L, K * self.ngroups, self.d_state).contiguous()  # (B, L, K*ngroups, d_state)
 
-            y_k = mamba_chunk_scan_combined(
-                    x_k, dt_k, A_k, B_k, C_k,
-                    chunk_size=self.chunk_size,
-                    D=D_k,
-                    z=None,
-                    dt_bias=dt_bias_k,
-                    dt_softplus=True,
-                )  # (B, L, nheads, headdim)
-
-            ys_list.append(y_k.reshape(B, L, D).permute(0, 2, 1))  # (B, D, L)
+        y_all = mamba_chunk_scan_combined(
+            x_all, dt_all, A, B_all, C_all,
+            chunk_size=self.chunk_size,
+            D=self.D.float(),
+            z=None,
+            dt_bias=self.dt_bias.float(),
+            dt_softplus=True,
+        )  # (B, L, K*nheads, headdim)
 
         # 4. Cross-merge: (B, K, D, H, W) → (B, D, H, W)
-        ys = torch.stack(ys_list, dim=1).view(B, K, D, H, W)
+        ys = y_all.reshape(B, L, K, nheads, self.headdim).permute(0, 2, 3, 4, 1).contiguous().reshape(B, K, D, H, W)
         y = cross_merge_fn(ys, in_channel_first=True, out_channel_first=True,
                            scans=scan_mode)
         return y.view(B, D, H, W)
