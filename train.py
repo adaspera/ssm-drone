@@ -3,7 +3,7 @@ import mamba_registry  # This registers everything
 from ultralytics import YOLO
 import torch
 
-MODEL_NAME = "yolo26-v-mamba2"
+MODEL_NAME = "yolo26-v-mamba-pure-big"
 DATA = "merged3v"
 
 def benchmark():
@@ -26,7 +26,7 @@ if __name__ == '__main__':
         name=f"{MODEL_NAME}-{DATA}",
         data=f"{DATA}.yaml", 
         epochs=50, 
-        batch=32,
+        batch=8,
         optimizer='SGD',
-        lr0=0.005, # 0.01 was ok
+        lr0=0.01, # 0.01 was ok
         device=0)
