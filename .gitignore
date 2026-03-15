@@ -1,0 +1,8 @@
+__pycache__/
+.vscode/
+.github/
+.directory
+/data/
+
+runs/
+pretrained/

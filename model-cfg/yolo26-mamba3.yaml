@@ -1,0 +1,46 @@
+# yolo26-mamba3.yaml — YOLO26 with Mamba-3 blocks (cross-scan + Mamba-3 SSM)
+# Mamba-3 changes: trapezoidal disc., complex SSM (RoPE), BC bias, QK-norm, no conv1d
+
+nc: 80
+end2end: True
+reg_max: 1
+
+backbone:
+  # [from, repeats, module, args]
+  - [-1, 1, Conv, [16, 3, 2]]                    # 0-P1/2
+  - [-1, 1, Conv, [32, 3, 2]]                    # 1-P2/4
+  - [-1, 1, C3k2, [64, False, 0.25]]             # 2
+
+  - [-1, 1, Conv, [64, 3, 2]]                    # 3-P3/8
+  # VMamba3: [dim, d_state, expand, headdim, mimo_rank]
+  - [-1, 1, VMamba3BlockYOLO, [64, 16, 2, 32]]   # 4-Mamba3 at P3/8
+  - [-1, 1, C3k2, [128, False, 0.25]]            # 5
+
+  - [-1, 1, Conv, [128, 3, 2]]                   # 6-P4/16
+  - [-1, 1, VMamba3BlockYOLO, [128, 16, 2, 64]]  # 7-Mamba3 at P4/16
+  - [-1, 1, C3k2, [128, True]]                   # 8
+
+  - [-1, 1, Conv, [256, 3, 2]]                   # 9-P5/32
+  - [-1, 1, VMamba3BlockYOLO, [256, 16, 2, 64]]  # 10-Mamba3 at P5/32
+  - [-1, 1, C3k2, [256, True]]                   # 11
+  - [-1, 1, SPPF, [256, 5, 3, True]]             # 12
+  - [-1, 1, C2PSA, [256]]                        # 13
+
+head:
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]
+  - [[-1, 7], 1, Concat, [1]]                    # cat backbone P4
+  - [-1, 1, C3k2, [128, True]]                   # 16
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]
+  - [[-1, 4], 1, Concat, [1]]                    # cat backbone P3
+  - [-1, 1, C3k2, [64, True]]                    # 19 (P3/8-small)
+
+  - [-1, 1, Conv, [64, 3, 2]]
+  - [[-1, 16], 1, Concat, [1]]                   # cat head P4
+  - [-1, 1, C3k2, [128, True]]                   # 22 (P4/16-medium)
+
+  - [-1, 1, Conv, [128, 3, 2]]
+  - [[-1, 13], 1, Concat, [1]]                   # cat head P5
+  - [-1, 1, C3k2, [256, True, 0.5, True]]        # 25 (P5/32-large)
+
+  - [[19, 22, 25], 1, Detect, [nc]]              # Detect(P3, P4, P5)

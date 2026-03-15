@@ -1,0 +1,44 @@
+# yolo26-mamba-25m-v2.yaml - ~2.5M params
+
+nc: 2
+end2end: True
+reg_max: 1
+scales:
+  # n: [0.50, 0.25, 1024]  # Commented out
+
+backbone:
+  - [-1, 1, Conv, [16, 3, 2]] # 0
+  - [-1, 1, Conv, [32, 3, 2]] # 1
+  - [-1, 1, C3k2, [64, False, 0.25]] # 2
+  - [-1, 1, Conv, [64, 3, 2]] # 3
+  - [-1, 1, C3k2, [128, False, 0.25]] # 4
+  - [-1, 1, Conv, [128, 3, 2]] # 5
+  - [-1, 1, C3k2, [128, True, 0.25]] # 6
+  - [-1, 1, Conv, [256, 3, 2]] # 7
+  - [-1, 1, MambaBlock, [256, 256, 16, 2]] # 8 - d_state=16
+  - [-1, 1, SPPF, [256, 5, 3, True]] # 9
+  - [-1, 1, C2PSA, [256]] # 10
+
+head:
+ # First Upsample Path - P4
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]] # 11
+  - [[-1, 6], 1, Concat, [1]]  # cat with backbone P4 (layer 6, NOT 7!)
+  - [-1, 1, C3k2, [128, True, 0.25]] # 12 - added e=0.25
+  
+  # Second Upsample Path - P3
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]] # 13
+  - [[-1, 4], 1, Concat, [1]]  # cat with backbone P3 (layer 4)
+  - [-1, 1, C3k2, [64, True, 0.25]] # 14 - added e=0.25 (P3/8-small)
+  
+  # Downsample P3→P4
+  - [-1, 1, Conv, [64, 3, 2]] # 15
+  - [[-1, 12], 1, Concat, [1]]  # cat with head P4 (layer 12, NOT 16!)
+  - [-1, 1, C3k2, [128, True, 0.25]] # 16 - added e=0.25 (P4/16-medium)
+  
+  # Downsample P4→P5
+  - [-1, 1, Conv, [128, 3, 2]] # 17
+  - [[-1, 10], 1, Concat, [1]]  # cat with backbone P5 (layer 10 - C2PSA, NOT 13!)
+  - [-1, 1, C3k2, [256, True, 0.5, True]] # 18 (P5/32-large)
+  
+  # Detect - update indices!
+  - [[14, 16, 18], 1, Detect, [nc]]  # P3=14, P4=16, P5=18

@@ -1,0 +1,6 @@
+train: ./data/UAV-roboflow/train/images
+val: ./data/UAV-roboflow/valid/images
+
+nc: 1
+names:
+- drone

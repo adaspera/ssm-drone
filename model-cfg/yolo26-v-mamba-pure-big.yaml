@@ -1,0 +1,45 @@
+# yolo26-v-mamba-pure-big.yaml
+# Bigger version of yolo26-v-mamba-pure.yaml
+# Changes vs pure:
+#   - Channels doubled: 32 → 64 → 128 → 256 → 512
+#   - VSSMBlock stacked x2 per stage (depth)
+#   - d_state raised 16 → 32 (richer state space, better long-range context)
+#   - C2PSA and SPPF at 512 channels
+#   - Head channels scaled to match: 256 (P4), 128 (P3), 512 (P5)
+
+nc: 1
+end2end: True
+reg_max: 1
+
+backbone:
+  # [from, repeats, module, args]
+  - [-1, 1, Conv, [32, 3, 2]]                    # 0-P1/2
+  - [-1, 1, Conv, [64, 3, 2]]                    # 1-P2/4
+  - [-1, 1, Conv, [128, 3, 2]]                   # 2-P3/8
+
+  # VSSMBlock args: [dim, d_state, ssm_ratio, d_conv]
+  - [-1, 2, VSSMBlock, [128, 32, 2.0, 3]]        # 3-VSS×2 at P3/8
+
+  - [-1, 1, Conv, [256, 3, 2]]                   # 4-P4/16
+  - [-1, 2, VSSMBlock, [256, 32, 2.0, 3]]        # 5-VSS×2 at P4/16
+
+  - [-1, 1, Conv, [512, 3, 2]]                   # 6-P5/32
+  - [-1, 2, VSSMBlock, [512, 32, 2.0, 3]]        # 7-VSS×2 at P5/32
+
+  - [-1, 1, SPPF, [512, 5, 3, True]]             # 8
+  - [-1, 1, C2PSA, [512]]                        # 9
+
+head:
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]   # 10
+  - [[-1, 5], 1, Concat, [1]]                    # 11 - cat with P4 (256)  → 512+256=768
+  - [-1, 1, C3k2, [256, True]]                   # 12
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]   # 13
+  - [[-1, 3], 1, Concat, [1]]                    # 14 - cat with P3 (128)  → 256+128=384
+  - [-1, 1, C3k2, [128, True]]                   # 15 (P3/8-small)
+  - [-1, 1, Conv, [128, 3, 2]]                   # 16
+  - [[-1, 12], 1, Concat, [1]]                   # 17                      → 128+256=384
+  - [-1, 1, C3k2, [256, True]]                   # 18 (P4/16-medium)
+  - [-1, 1, Conv, [256, 3, 2]]                   # 19
+  - [[-1, 9], 1, Concat, [1]]                    # 20 - cat with C2PSA (512) → 256+512=768
+  - [-1, 1, C3k2, [512, True, 0.5, True]]        # 21 (P5/32-large)
+  - [[15, 18, 21], 1, Detect, [nc]]              # 22

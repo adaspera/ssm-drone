@@ -1,0 +1,56 @@
+# yolo26-v-mamba-vmamba-first.yaml - VMamba first, THEN C3k2, C3k2 connects to head
+
+nc: 2
+end2end: True
+reg_max: 1
+
+backbone:
+  # [from, repeats, module, args]
+  - [-1, 1, Conv, [16, 3, 2]] # 0-P1/2
+  - [-1, 1, Conv, [32, 3, 2]] # 1-P2/4
+  - [-1, 1, C3k2, [64, False, 0.25]]
+  - [-1, 1, Conv, [64, 3, 2]] # 3-P3/8
+  
+  # VMamba FIRST at P3/8
+  - [-1, 1, VMambaBlock, [64, 16, 2, 3]]   # 4-VMamba first - global context
+  # THEN C3k2 block
+  - [-1, 1, C3k2, [64, False, 0.25]]       # 5-C3k2 second - local refinement - WILL connect to head
+  
+  - [-1, 1, Conv, [128, 3, 2]] # 6-P4/16
+  
+  # VMamba FIRST at P4/16
+  - [-1, 1, VMambaBlock, [128, 16, 2, 3]]  # 7-VMamba first - global context
+  # THEN C3k2 block
+  - [-1, 1, C3k2, [128, True]]             # 8-C3k2 second - local refinement - WILL connect to head
+  
+  - [-1, 1, Conv, [256, 3, 2]] # 9-P5/32
+  
+  # VMamba FIRST at P5/32
+  - [-1, 1, VMambaBlock, [256, 16, 2, 3]]  # 10-VMamba first - global context
+  # THEN C3k2 block
+  - [-1, 1, C3k2, [256, True]]             # 11-C3k2 second - local refinement - WILL connect to head
+  
+  - [-1, 1, SPPF, [256, 5, 3, True]]       # 12
+  - [-1, 1, C2PSA, [256]]                   # 13
+
+head:
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]
+  # Connect to C3k2 at P4/16 (Layer 8) - NOT the VMamba
+  - [[-1, 8], 1, Concat, [1]]               # 15 - Connects to C3k2!
+  - [-1, 1, C3k2, [128, True]]              # 16
+  
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]
+  # Connect to C3k2 at P3/8 (Layer 5) - NOT the VMamba
+  - [[-1, 5], 1, Concat, [1]]               # 18 - Connects to C3k2!
+  - [-1, 1, C3k2, [64, True]]               # 19 (P3/8-small)
+  
+  - [-1, 1, Conv, [64, 3, 2]]
+  - [[-1, 16], 1, Concat, [1]]
+  - [-1, 1, C3k2, [128, True]]              # 22 (P4/16-medium)
+  
+  - [-1, 1, Conv, [128, 3, 2]]
+  # Connect to final backbone features
+  - [[-1, 13], 1, Concat, [1]]
+  - [-1, 1, C3k2, [256, True, 0.5, True]]   # 25 (P5/32-large)
+  
+  - [[19, 22, 25], 1, Detect, [nc]]

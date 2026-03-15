@@ -1,0 +1,53 @@
+# yolo26-v-mamba2-big.yaml
+# Bigger Mamba2 backbone using paper-ideal parameters:
+#   headdim=64  — canonical Mamba2 head size from paper
+#   d_state=64  — paper default (N=64)
+#   ngroups=1   — single B/C group (paper default)
+#   chunk_size  — scaled per resolution
+#
+# Backbone channels doubled (vs yolo26-v-mamba2.yaml) so headdim=64 gives:
+#   P3: d_inner=256, 4 heads  (vs 2 heads with dim=64)
+#   P4: d_inner=512, 8 heads
+#   P5: d_inner=1024, 16 heads
+#
+# A/B test target: beat yolo26-v-mamba2.yaml (currently 0.47 mAP)
+
+nc: 1
+end2end: True
+reg_max: 1
+
+backbone:
+  # [from, repeats, module, args]
+  - [-1, 1, Conv, [32, 3, 2]]               # 0-P1/2
+  - [-1, 1, Conv, [64, 3, 2]]               # 1-P2/4
+  - [-1, 1, Conv, [128, 3, 2]]              # 2-P3/8
+
+  # VSSMBlock_Mamba2 args: [dim, d_state, ssm_ratio, d_conv, headdim, chunk_size, ngroups]
+  # P3: d_inner=256, headdim=64 → 4 heads | chunk_size=128 (L=6400, 50 chunks)
+  - [-1, 2, VSSMBlock_Mamba2, [128, 64, 2.0, 3, 64, 128, 1]]  # 3-VSS×2 at P3/8
+
+  - [-1, 1, Conv, [256, 3, 2]]              # 4-P4/16
+  # P4: d_inner=512, headdim=64 → 8 heads | chunk_size=256 (L=1600, 6 chunks)
+  - [-1, 2, VSSMBlock_Mamba2, [256, 64, 2.0, 3, 64, 256, 1]]  # 5-VSS×2 at P4/16
+
+  - [-1, 1, Conv, [512, 3, 2]]              # 6-P5/32
+  # P5: d_inner=1024, headdim=64 → 16 heads | chunk_size=256 (L=400, 2 chunks)
+  - [-1, 2, VSSMBlock_Mamba2, [512, 64, 2.0, 3, 64, 256, 1]]  # 7-VSS×2 at P5/32
+
+  - [-1, 1, SPPF, [512, 5, 3, True]]       # 8
+  - [-1, 1, C2PSA, [512]]                  # 9
+
+head:
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]  # 10
+  - [[-1, 5], 1, Concat, [1]]                    # 11 - cat with P4 (256)  → 512+256=768
+  - [-1, 1, C3k2, [256, True]]                   # 12
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]  # 13
+  - [[-1, 3], 1, Concat, [1]]                    # 14 - cat with P3 (128)  → 256+128=384
+  - [-1, 1, C3k2, [128, True]]                   # 15 (P3/8-small)
+  - [-1, 1, Conv, [128, 3, 2]]                   # 16
+  - [[-1, 12], 1, Concat, [1]]                   # 17                      → 128+256=384
+  - [-1, 1, C3k2, [256, True]]                   # 18 (P4/16-medium)
+  - [-1, 1, Conv, [256, 3, 2]]                   # 19
+  - [[-1, 9], 1, Concat, [1]]                    # 20 - cat with C2PSA (512) → 256+512=768
+  - [-1, 1, C3k2, [512, True, 0.5, True]]        # 21 (P5/32-large)
+  - [[15, 18, 21], 1, Detect, [nc]]              # 22

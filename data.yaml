@@ -1,0 +1,7 @@
+train: ./data/mergedv2/train/images
+val: ./data/mergedv2/val/images
+
+nc: 2
+names:
+- drone
+- bird
