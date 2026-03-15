@@ -82,17 +82,18 @@ class VMambaBlock(nn.Module):
 
 class VSSMBlock(nn.Module):
     """Wrapper around VMamba's VSSBlock for YOLO integration (channel-first).
-    YAML args: [dim, d_state, ssm_ratio, d_conv]
+    YAML args: [dim, d_state, ssm_ratio, d_conv, mlp_ratio]
     """
     def __init__(self, *args, **kwargs):
         super().__init__()
 
         if len(args) >= 1:
             print(args)
-            dim = args[0]
-            d_state  = args[1] if len(args) > 1 else 16
+            dim       = args[0]
+            d_state   = args[1] if len(args) > 1 else 16
             ssm_ratio = args[2] if len(args) > 2 else 2.0
-            d_conv   = args[3] if len(args) > 3 else 3
+            d_conv    = args[3] if len(args) > 3 else 3
+            mlp_ratio = args[4] if len(args) > 4 else 4.0
         else:
             raise Exception("VSSMBlock requires at least dim argument")
 
@@ -103,6 +104,7 @@ class VSSMBlock(nn.Module):
             ssm_ratio=ssm_ratio,
             ssm_conv=d_conv,
             forward_type="v2",
+            mlp_ratio=mlp_ratio,
         ).to('cuda')
 
     def forward(self, x):
@@ -113,7 +115,7 @@ class VSSMBlock(nn.Module):
 
 class VSSMBlock_Mamba2(nn.Module):
     """Wrapper around VMamba's VSSBlock_Mamba2 for YOLO integration (channel-first).
-    YAML args: [dim, d_state, ssm_ratio, d_conv, headdim, chunk_size, ngroups]
+    YAML args: [dim, d_state, ssm_ratio, d_conv, headdim, chunk_size, ngroups, mlp_ratio]
       dim        : input/output channel count (set by YOLO from previous layer)
       d_state    : SSM state size (default 64, Mamba2 recommended)
       ssm_ratio  : expansion ratio for d_inner (default 2.0)
@@ -121,6 +123,9 @@ class VSSMBlock_Mamba2(nn.Module):
       headdim    : head dimension inside SSD — d_inner must be divisible (default 64)
       chunk_size : SSD chunk length for parallel scan (default 256)
       ngroups    : number of B/C groups shared across heads (default 1)
+      mlp_ratio  : MLP expansion (default 4.0, set 0 to disable MLP entirely)
+      use_rope   : apply Rotary Position Embedding to B/C projections (default False)
+      rope_theta : RoPE frequency base (default 10000)
     """
     def __init__(self, *args, **kwargs):
         super().__init__()
@@ -133,6 +138,9 @@ class VSSMBlock_Mamba2(nn.Module):
             headdim    = args[4] if len(args) > 4 else 64
             chunk_size = args[5] if len(args) > 5 else 256
             ngroups    = args[6] if len(args) > 6 else 1
+            mlp_ratio  = args[7] if len(args) > 7 else 4.0
+            use_rope   = bool(args[8]) if len(args) > 8 else False
+            rope_theta = float(args[9]) if len(args) > 9 else 10000.0
         else:
             raise Exception("VSSMBlock_Mamba2 requires at least dim argument")
 
@@ -154,6 +162,9 @@ class VSSMBlock_Mamba2(nn.Module):
             ssm_ngroups=ngroups,
             ssm_chunk_size=chunk_size,
             ssm_rmsnorm=True,
+            mlp_ratio=mlp_ratio,
+            use_rope=use_rope,
+            rope_theta=rope_theta,
         ).to('cuda')
 
     def forward(self, x):

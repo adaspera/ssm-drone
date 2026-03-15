@@ -1690,6 +1690,9 @@ class SS2Dv_Mamba2:
         ngroups=1,           # number of B/C groups (shared across heads)
         chunk_size=256,      # SSD chunk length
         rmsnorm=True,        # use RMSNormGated on output (like Mamba2)
+        # RoPE =================
+        use_rope=False,
+        rope_theta=10000.0,
         # ======================
         forward_type="ssd",
         channel_first=False,
@@ -1771,6 +1774,8 @@ class SS2Dv_Mamba2:
             self._use_rmsnorm_gated = True
 
         # ---- out_proj ----
+        self.use_rope = use_rope
+        self.rope_theta = rope_theta
         self.out_proj = Linear(self.d_inner, self.d_model, bias=bias, channel_first=channel_first)
         self.dropout = nn.Dropout(dropout) if dropout > 0. else nn.Identity()
 
@@ -1816,6 +1821,7 @@ class SS2Dv_Mamba2:
             z=None,
             dt_bias=self.dt_bias.float(),
             dt_softplus=True,
+            rope_theta=self.rope_theta if self.use_rope else None,
         )  # (B, L, K*nheads, headdim)
 
         # 4. Cross-merge: (B, K, D, H, W) → (B, D, H, W)
