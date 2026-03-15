@@ -5,6 +5,10 @@ conda activate mamba-env
 
 conda install cuda-toolkit=12.8 -c nvidia
 
+which nvcc
+
+CUDA_HOME=/home/justas/miniconda3/envs/mamba-env pip install -e ./libs/mamba
+
 # Launch
 
 cd /run/media/justas/Windows/Users/jusci/My\ Documents/Justo/VU/Bakis/
