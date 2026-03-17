@@ -82,18 +82,20 @@ class VMambaBlock(nn.Module):
 
 class VSSMBlock(nn.Module):
     """Wrapper around VMamba's VSSBlock for YOLO integration (channel-first).
-    YAML args: [dim, d_state, ssm_ratio, d_conv, mlp_ratio]
+    YAML args: [dim, d_state, ssm_ratio, d_conv, mlp_ratio, use_rope, rope_theta]
     """
     def __init__(self, *args, **kwargs):
         super().__init__()
 
         if len(args) >= 1:
             print(args)
-            dim       = args[0]
-            d_state   = args[1] if len(args) > 1 else 16
-            ssm_ratio = args[2] if len(args) > 2 else 2.0
-            d_conv    = args[3] if len(args) > 3 else 3
-            mlp_ratio = args[4] if len(args) > 4 else 4.0
+            dim        = args[0]
+            d_state    = args[1] if len(args) > 1 else 16
+            ssm_ratio  = args[2] if len(args) > 2 else 2.0
+            d_conv     = args[3] if len(args) > 3 else 3
+            mlp_ratio  = args[4] if len(args) > 4 else 4.0
+            use_rope   = bool(args[5]) if len(args) > 5 else False
+            rope_theta = float(args[6]) if len(args) > 6 else 10000.0
         else:
             raise Exception("VSSMBlock requires at least dim argument")
 
@@ -105,6 +107,8 @@ class VSSMBlock(nn.Module):
             ssm_conv=d_conv,
             forward_type="v2",
             mlp_ratio=mlp_ratio,
+            use_rope=use_rope,
+            rope_theta=rope_theta,
         ).to('cuda')
 
     def forward(self, x):

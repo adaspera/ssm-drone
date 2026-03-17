@@ -1413,6 +1413,9 @@ class SS2Dv2:
         # ======================
         forward_type="v2",
         channel_first=False,
+        # RoPE =================
+        use_rope=False,
+        rope_theta=10000.0,
         # ======================
         **kwargs,    
     ):
@@ -1484,6 +1487,8 @@ class SS2Dv2:
         # del self.x_proj
         
         # out proj =======================================
+        self.use_rope = use_rope
+        self.rope_theta = rope_theta
         self.out_act = nn.GELU() if self.oact else nn.Identity()
         self.out_proj = Linear(self.d_inner, self.d_model, bias=bias, channel_first=channel_first)
         self.dropout = nn.Dropout(dropout) if dropout > 0. else nn.Identity()
@@ -1554,6 +1559,15 @@ class SS2Dv2:
             Bs = Bs.contiguous().view(B, K, N, L)
             Cs = Cs.contiguous().view(B, K, N, L)
             delta_bias = self.dt_projs_bias.view(-1).to(torch.float)
+
+            # Apply RoPE to B and C: permute to (B, L, K, N), rotate, permute back.
+            if getattr(self, 'use_rope', False):
+                from mamba_ssm.ops.triton.ssd_combined import _rope_apply_bc
+                Bs_r = Bs.permute(0, 3, 1, 2).contiguous()  # (B, L, K, N)
+                Cs_r = Cs.permute(0, 3, 1, 2).contiguous()
+                Bs_r, Cs_r = _rope_apply_bc(Bs_r, Cs_r, self.rope_theta)
+                Bs = Bs_r.permute(0, 2, 3, 1).contiguous()  # (B, K, N, L)
+                Cs = Cs_r.permute(0, 2, 3, 1).contiguous()
 
             if force_fp32:
                 xs, dts, Bs, Cs = to_fp32(xs, dts, Bs, Cs)
@@ -1981,6 +1995,9 @@ class VSSBlock(nn.Module):
         use_checkpoint: bool = False,
         post_norm: bool = False,
         # =============================
+        use_rope: bool = False,
+        rope_theta: float = 10000.0,
+        # =============================
         **kwargs,
     ):
         super().__init__()
@@ -2013,6 +2030,8 @@ class VSSBlock(nn.Module):
                 # ==========================
                 forward_type=forward_type,
                 channel_first=channel_first,
+                use_rope=use_rope,
+                rope_theta=rope_theta,
             )
         
         self.drop_path = DropPath(drop_path)
