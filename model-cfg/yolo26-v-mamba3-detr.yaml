@@ -1,0 +1,51 @@
+# yolo26-v-mamba3-detr.yaml
+# RT-DETR-style architecture with MambaDETRDecoder instead of RTDETRDecoder.
+# Backbone: deep Conv+C3k2, VSSMBlock_Mamba3 as AIFI equivalent on P5.
+# Neck: RT-DETR FPN+PAN with RepC3 blocks, fixed 128ch.
+# Head: MambaDETRDecoder (self-Mamba + cross-sampling Mamba, 6 layers, 300 queries).
+#
+# YAML usage mirrors RTDETRDecoder: tasks.py inserts channel sizes automatically.
+
+nc: 1
+
+backbone:
+  # [from, repeats, module, args]
+  - [-1, 1, Conv, [16, 3, 2]]                                    # 0-P1/2
+  - [-1, 1, Conv, [32, 3, 2]]                                    # 1-P2/4
+  - [-1, 3, C3k2, [64, False, 0.25]]                             # 2 - stage 1 (P2/4)
+  - [-1, 1, Conv, [128, 3, 2]]                                   # 3-P3/8
+  - [-1, 3, C3k2, [128, False, 0.25]]                            # 4 - stage 2 (P3/8)
+  - [-1, 1, Conv, [256, 3, 2]]                                   # 5-P4/16
+  - [-1, 6, C3k2, [256, True]]                                   # 6 - stage 3 (P4/16, deep like RT-DETR)
+  - [-1, 1, Conv, [256, 3, 2]]                                   # 7-P5/32
+  - [-1, 3, C3k2, [256, True]]                                   # 8 - stage 4 (P5/32)
+  - [-1, 1, SPPF, [256, 5, 3, True]]                            # 9
+  # VSSMBlock_Mamba3 as AIFI equivalent on P5: d_inner=512, headdim=64 → 8 heads
+  - [-1, 1, VSSMBlock_Mamba3, [256, 128, 2.0, 3, 64, 64, 1]]   # 10
+
+head:
+  # RT-DETR-style: no-activation input projection before neck
+  - [-1, 1, Conv, [128, 1, 1, None, 1, 1, False]]               # 11 - input_proj P5 → 128ch
+  - [-1, 1, Conv, [128, 1, 1]]                                   # 12 - lateral_conv P5
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]                  # 13
+  - [6, 1, Conv, [128, 1, 1, None, 1, 1, False]]                # 14 - input_proj P4 → 128ch
+  - [[-2, -1], 1, Concat, [1]]                                   # 15 - cat (256ch)
+  - [-1, 3, C3k2, [128, True]]                                   # 16 - FPN P4
+  - [-1, 1, Conv, [128, 1, 1]]                                   # 17 - lateral_conv P4
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]                  # 18
+  - [4, 1, Conv, [128, 1, 1, None, 1, 1, False]]                # 19 - input_proj P3 → 128ch
+  - [[-2, -1], 1, Concat, [1]]                                   # 20 - cat (256ch)
+  - [-1, 3, C3k2, [128, True]]                                   # 21 - X3 (P3/8)
+
+  - [-1, 1, Conv, [128, 3, 2]]                                   # 22 - downsample
+  - [[-1, 17], 1, Concat, [1]]                                   # 23 - cat lateral P4
+  - [-1, 3, C3k2, [128, True]]                                   # 24 - F4 (P4/16)
+
+  - [-1, 1, Conv, [128, 3, 2]]                                   # 25 - downsample
+  - [[-1, 12], 1, Concat, [1]]                                   # 26 - cat lateral P5
+  - [-1, 3, C3k2, [128, True]]                                   # 27 - F5 (P5/32)
+
+  # MambaDETRDecoder args: [nc]  — channels (128,128,128) inserted by tasks.py
+  - [[21, 24, 27], 1, MambaDETRDecoder, [nc]]                   # 28
