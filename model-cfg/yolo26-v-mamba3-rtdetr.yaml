@@ -1,0 +1,55 @@
+# yolo26-v-mamba3-rtdetr.yaml
+# Option B: VSSMBlock_Mamba3 after every FPN+PAN block for multi-scale global context
+# RT-DETR-inspired backbone + neck structure, Mamba3 replaces transformer at all output scales
+
+nc: 1
+end2end: True
+reg_max: 1
+
+backbone:
+  # [from, repeats, module, args]
+  - [-1, 1, Conv, [16, 3, 2]]                                    # 0-P1/2
+  - [-1, 1, Conv, [32, 3, 2]]                                    # 1-P2/4
+  - [-1, 3, C3k2, [64, False, 0.25]]                             # 2 - stage 1 (P2/4)
+  - [-1, 1, Conv, [128, 3, 2]]                                   # 3-P3/8
+  - [-1, 3, C3k2, [128, False, 0.25]]                            # 4 - stage 2 (P3/8)
+  - [-1, 1, Conv, [256, 3, 2]]                                   # 5-P4/16
+  - [-1, 6, C3k2, [256, True]]                                   # 6 - stage 3 (P4/16)
+  - [-1, 1, Conv, [256, 3, 2]]                                   # 7-P5/32
+  - [-1, 3, C3k2, [256, True]]                                   # 8 - stage 4 (P5/32)
+  - [-1, 1, SPPF, [256, 5, 3, True]]                            # 9
+  # VSSMBlock_Mamba3 as AIFI equivalent: global context on P5 before FPN
+  # d_inner=512, headdim=64 → 8 heads
+  - [-1, 1, VSSMBlock_Mamba3, [256, 128, 2.0, 3, 64, 64, 1]]   # 10
+
+head:
+  # --- RT-DETR-style input projections: no activation (last arg False) ---
+  - [-1, 1, Conv, [128, 1, 1, None, 1, 1, False]]               # 11 - input_proj P5 → 128ch
+  - [-1, 1, Conv, [128, 1, 1]]                                   # 12 - lateral_conv P5
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]                  # 13
+  - [6, 1, Conv, [128, 1, 1, None, 1, 1, False]]                # 14 - input_proj P4 → 128ch
+  - [[-2, -1], 1, Concat, [1]]                                   # 15 - cat (256ch)
+  - [-1, 3, C3k2, [128, True]]                                   # 16 - FPN P4
+  # d_inner=256, headdim=64 → 4 heads
+  - [-1, 1, VSSMBlock_Mamba3, [128, 128, 2.0, 3, 64, 64, 1]]   # 17 - global context P4 FPN
+  - [-1, 1, Conv, [128, 1, 1]]                                   # 18 - lateral_conv P4
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]                  # 19
+  - [4, 1, Conv, [128, 1, 1, None, 1, 1, False]]                # 20 - input_proj P3 → 128ch
+  - [[-2, -1], 1, Concat, [1]]                                   # 21 - cat (256ch)
+  - [-1, 3, C3k2, [128, True]]                                   # 22 - FPN P3
+  # d_inner=256, headdim=64 → 4 heads
+  - [-1, 1, VSSMBlock_Mamba3, [128, 128, 2.0, 3, 64, 64, 1]]   # 23 (P3/8-small)
+
+  - [-1, 1, Conv, [128, 3, 2]]                                   # 24 - downsample
+  - [[-1, 18], 1, Concat, [1]]                                   # 25 - cat lateral P4 (256ch)
+  - [-1, 3, C3k2, [128, True]]                                   # 26 - PAN P4
+  - [-1, 1, VSSMBlock_Mamba3, [128, 128, 2.0, 3, 64, 64, 1]]   # 27 (P4/16-medium)
+
+  - [-1, 1, Conv, [128, 3, 2]]                                   # 28 - downsample
+  - [[-1, 12], 1, Concat, [1]]                                   # 29 - cat lateral P5 (256ch)
+  - [-1, 3, C3k2, [128, True]]                                   # 30 - PAN P5
+  - [-1, 1, VSSMBlock_Mamba3, [128, 128, 2.0, 3, 64, 64, 1]]   # 31 (P5/32-large)
+
+  - [[23, 27, 31], 1, Detect, [nc]]                             # 32

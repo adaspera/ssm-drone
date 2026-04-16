@@ -1,11 +1,15 @@
 # mamba_registry.py
+import sys
+import os
+
+# Ensure workspace root is on path so mamba_decoder.py can be found
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.append('./libs/VMamba')  # Add VMamba to path
+
 import torch
 import torch.nn as nn
 from ultralytics.nn.tasks import parse_model
 import ultralytics.nn.modules as modules
-
-import sys
-sys.path.append('./libs/VMamba')  # Add VMamba to path
 
 import vmamba
 from vmamba import VSSBlock, VSSBlock_Mamba2, VSSBlock_Mamba3
@@ -13,6 +17,7 @@ from vmamba import VSSBlock, VSSBlock_Mamba2, VSSBlock_Mamba3
 from mamba_block import Mamba2DStable
 from vmamba_block import VMamba2DBlock
 from mamba_ssm import Mamba2
+from mamba_decoder import MambaDecoderLayer, MambaDecoder, MambaDETRDecoderDetect  # noqa: F401
 
 class MambaBlock(nn.Module):
     def __init__(self, *args, **kwargs):
@@ -261,6 +266,7 @@ def mamba_parse_model(d, ch, verbose=True):
     original_globals['VSSMBlock'] = VSSMBlock
     original_globals['VSSMBlock_Mamba2'] = VSSMBlock_Mamba2
     original_globals['VSSMBlock_Mamba3'] = VSSMBlock_Mamba3
+    original_globals['MambaDETRDecoderDetect'] = MambaDETRDecoderDetect
     
     try:
         return _original_parse_model(d, ch, verbose)
@@ -277,3 +283,7 @@ modules.VMambaBlock2Way = VMambaBlock2Way
 modules.VSSMBlock = VSSMBlock
 modules.VSSMBlock_Mamba2 = VSSMBlock_Mamba2
 modules.VSSMBlock_Mamba3 = VSSMBlock_Mamba3
+
+# Register MambaDETRDecoderDetect (and helpers) from mamba_decoder.py
+modules.MambaDETRDecoderDetect = MambaDETRDecoderDetect
+tasks.__dict__['MambaDETRDecoderDetect'] = MambaDETRDecoderDetect

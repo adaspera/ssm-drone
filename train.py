@@ -1,10 +1,10 @@
 # train.py
 import mamba_registry  # This registers everything
-from ultralytics import YOLO
+from ultralytics import YOLO, RTDETR
 import torch
 
-MODEL_NAME = "yolo26-v-mamba3"
-DATA = "merged3v"
+MODEL_NAME = "yolo26-v-mamba3-decoder"
+DATA = "coco128"
 
 def benchmark():
     model = YOLO(f"./runs/detect/{MODEL_NAME}-{DATA}3/weights/best.pt")
@@ -19,7 +19,7 @@ if __name__ == '__main__':
     # benchmark()
     # train_rf_detr()
 
-    model = YOLO(f"model-cfg/{MODEL_NAME}.yaml")
+    model = RTDETR(f"model-cfg/{MODEL_NAME}.yaml")
     # model = YOLO(f"{MODEL_NAME}.yaml").load(f"./pretrained/{MODEL_NAME}/weights/best.pt")
 
     results = model.train(
