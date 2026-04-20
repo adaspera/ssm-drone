@@ -1,0 +1,44 @@
+# yolo26-vmamba-neck.yaml
+
+nc: 1
+end2end: True
+reg_max: 1
+
+backbone:
+  # [from, repeats, module, args]
+  - [-1, 1, Conv, [16, 3, 2]]                    # 0-P1/2
+  - [-1, 1, Conv, [32, 3, 2]]                    # 1-P2/4
+  - [-1, 1, C3k2, [64, False, 0.25]]             # 2
+  - [-1, 1, Conv, [64, 3, 2]]                    # 3-P3/8
+  - [-1, 1, C3k2, [128, False, 0.25]]            # 4
+  - [-1, 1, Conv, [128, 3, 2]]                   # 5-P4/16
+  - [-1, 1, C3k2, [128, True]]                   # 6
+  - [-1, 1, Conv, [256, 3, 2]]                   # 7-P5/32
+  - [-1, 1, C3k2, [256, True]]                   # 8
+  - [-1, 1, SPPF, [256, 5, 3, True]]             # 9
+  - [-1, 1, C2PSA, [256]]                        # 10 - standard attention
+
+head:
+  # Top-down pathway
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]   # 11
+  - [[-1, 6], 1, Concat, [1]]                    # 12 - cat P4 (128ch) → 384ch
+  - [-1, 1, Conv, [128, 1, 1]]                   # 13 - reduce channels
+  - [-1, 1, VSSMBlock, [128, 16, 2.0, 3]]        # 14
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]   # 15
+  - [[-1, 4], 1, Concat, [1]]                    # 16 - cat P3 (128ch) → 256ch
+  - [-1, 1, Conv, [64, 1, 1]]                    # 17 - reduce channels
+  - [-1, 1, VSSMBlock, [64, 16, 2.0, 3]]         # 18 (P3/8-small)
+
+  # Bottom-up pathway
+  - [-1, 1, Conv, [64, 3, 2]]                    # 19
+  - [[-1, 14], 1, Concat, [1]]                   # 20 - cat 64+128=192ch
+  - [-1, 1, Conv, [128, 1, 1]]                   # 21 - reduce channels
+  - [-1, 1, VSSMBlock, [128, 16, 2.0, 3]]        # 22 (P4/16-medium)
+
+  - [-1, 1, Conv, [128, 3, 2]]                   # 23
+  - [[-1, 10], 1, Concat, [1]]                   # 24 - cat 128+256=384ch
+  - [-1, 1, Conv, [256, 1, 1]]                   # 25 - reduce channels
+  - [-1, 1, VSSMBlock, [256, 16, 2.0, 3]]        # 26 (P5/32-large)
+
+  - [[18, 22, 26], 1, Detect, [nc]]              # 27

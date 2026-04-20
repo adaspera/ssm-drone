@@ -17,7 +17,6 @@ from vmamba import VSSBlock, VSSBlock_Mamba2, VSSBlock_Mamba3
 from mamba_block import Mamba2DStable
 from vmamba_block import VMamba2DBlock
 from mamba_ssm import Mamba2
-from mamba_decoder import MambaDecoderLayer, MambaDecoder, MambaDETRDecoderDetect  # noqa: F401
 
 class MambaBlock(nn.Module):
     def __init__(self, *args, **kwargs):
@@ -266,7 +265,6 @@ def mamba_parse_model(d, ch, verbose=True):
     original_globals['VSSMBlock'] = VSSMBlock
     original_globals['VSSMBlock_Mamba2'] = VSSMBlock_Mamba2
     original_globals['VSSMBlock_Mamba3'] = VSSMBlock_Mamba3
-    original_globals['MambaDETRDecoderDetect'] = MambaDETRDecoderDetect
     
     try:
         return _original_parse_model(d, ch, verbose)
@@ -284,6 +282,3 @@ modules.VSSMBlock = VSSMBlock
 modules.VSSMBlock_Mamba2 = VSSMBlock_Mamba2
 modules.VSSMBlock_Mamba3 = VSSMBlock_Mamba3
 
-# Register MambaDETRDecoderDetect (and helpers) from mamba_decoder.py
-modules.MambaDETRDecoderDetect = MambaDETRDecoderDetect
-tasks.__dict__['MambaDETRDecoderDetect'] = MambaDETRDecoderDetect
