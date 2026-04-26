@@ -219,6 +219,56 @@ class VSSMBlock_Mamba3(nn.Module):
         return x.to(device=device, dtype=dtype)
 
 
+class VSSMBlock_Mamba3_MIMO(nn.Module):
+    """VSSMBlock_Mamba3 with MIMO kernel enabled.
+    YAML args: [dim, d_state, ssm_ratio, d_conv, headdim, chunk_size, ngroups, mimo_rank]
+      dim        : input/output channel count
+      d_state    : SSM state size (default 128)
+      ssm_ratio  : expansion ratio (default 2.0)
+      d_conv     : depthwise conv kernel (default 3)
+      headdim    : head dimension (default 64)
+      chunk_size : chunk length — recommend <= 64//(mimo_rank*2), min 16 for TileLang warp partition (default 16)
+      ngroups    : B/C groups (default 1)
+      mimo_rank  : MIMO rank R (default 2)
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        dim        = args[0]
+        d_state    = args[1] if len(args) > 1 else 128
+        ssm_ratio  = args[2] if len(args) > 2 else 2.0
+        d_conv     = args[3] if len(args) > 3 else 3
+        headdim    = args[4] if len(args) > 4 else 64
+        chunk_size = args[5] if len(args) > 5 else 16
+        ngroups    = args[6] if len(args) > 6 else 1
+        mimo_rank  = args[7] if len(args) > 7 else 2
+
+        d_inner = int(ssm_ratio * dim)
+        assert d_inner % headdim == 0, (
+            f"VSSMBlock_Mamba3_MIMO: d_inner ({d_inner}) must be divisible by headdim ({headdim})."
+        )
+
+        self.block = VSSBlock_Mamba3(
+            hidden_dim=dim,
+            channel_first=True,
+            ssm_d_state=d_state,
+            ssm_ratio=ssm_ratio,
+            ssm_conv=d_conv,
+            forward_type="m3",
+            ssm_headdim=headdim,
+            ssm_ngroups=ngroups,
+            ssm_chunk_size=chunk_size,
+            ssm_rmsnorm=True,
+            is_mimo=True,
+            mimo_rank=mimo_rank,
+        ).to('cuda')
+
+    def forward(self, x):
+        device = x.device
+        dtype = x.dtype
+        x = self.block(x.to('cuda'))
+        return x.to(device=device, dtype=dtype)
+
+
 class VMambaBlock2Way(nn.Module):
     def __init__(self, *args, **kwargs):
         super().__init__()
@@ -265,6 +315,7 @@ def mamba_parse_model(d, ch, verbose=True):
     original_globals['VSSMBlock'] = VSSMBlock
     original_globals['VSSMBlock_Mamba2'] = VSSMBlock_Mamba2
     original_globals['VSSMBlock_Mamba3'] = VSSMBlock_Mamba3
+    original_globals['VSSMBlock_Mamba3_MIMO'] = VSSMBlock_Mamba3_MIMO
     
     try:
         return _original_parse_model(d, ch, verbose)
@@ -281,4 +332,5 @@ modules.VMambaBlock2Way = VMambaBlock2Way
 modules.VSSMBlock = VSSMBlock
 modules.VSSMBlock_Mamba2 = VSSMBlock_Mamba2
 modules.VSSMBlock_Mamba3 = VSSMBlock_Mamba3
+modules.VSSMBlock_Mamba3_MIMO = VSSMBlock_Mamba3_MIMO
 

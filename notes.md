@@ -36,6 +36,15 @@ ln -s /run/media/justas/Storage/Bakis/libs/mamba/mamba_ssm/ops/triton/mamba3 \
 This makes `from mamba_ssm.ops.triton.mamba3.mamba3_siso_combined import mamba3_siso_combined` work
 without rebuilding the entire package (which requires CUDA at build time).
 
+For MIMO support, also symlink the tilelang ops and install tilelang:
+
+```
+ln -s /run/media/justas/Storage/Bakis/libs/mamba/mamba_ssm/ops/tilelang \
+      ./venv/lib/python3.14/site-packages/mamba_ssm/ops/tilelang
+
+pip install tilelang
+```
+
 Or just install it as an editable code with pip -e .
 idk its your life
 
@@ -73,3 +82,9 @@ tensorboard --logdir ./runs/rfdetr
 ### File transfer
 
 rsync -avz --progress /run/media/justas/Storage/Bakis/data/mergedv3/ bakis-vast:/root/workspace/ssm-drone/data/mergedv3/
+
+
+### Timm
+
+Remember installing older timm: timm 0.4.12
+dont remember why

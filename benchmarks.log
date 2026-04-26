@@ -218,3 +218,19 @@ Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - 
 +===========================================================================================+
 | 1   PyTorch   ✅         14.3        0.0012                17.28                    57.86 |
 +-------------------------------------------------------------------------------------------+
+
+Benchmarks complete for /run/media/justas/Storage/Bakis/pretrained/yolo26-v-mamba3-merged3v3/weights/best.pt on merged3v.yaml at imgsz=640 (0.63s)
+Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - ❌️ Export failed
++-----------------------------------------------------------------------------------------+
+|     Format    Status❔   Size (MB)   metrics/mAP50-95(B)   Inference time (ms/im)   FPS |
++=========================================================================================+
+| 1   PyTorch   ❎         8.5         -                     -                        -   |
++-----------------------------------------------------------------------------------------+
+
+Benchmarks complete for /run/media/justas/Storage/Bakis/pretrained/yolo26-v-mamba3-merged3v3/weights/best.pt on merged3v.yaml at imgsz=640 (0.56s)
+Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - ❌️ Export failed
++-----------------------------------------------------------------------------------------+
+|     Format    Status❔   Size (MB)   metrics/mAP50-95(B)   Inference time (ms/im)   FPS |
++=========================================================================================+
+| 1   PyTorch   ❎         8.5         -                     -                        -   |
++-----------------------------------------------------------------------------------------+

@@ -796,6 +796,7 @@ except ImportError:
 WITH_MAMBA3_SISO = True
 try:
     from mamba_ssm.ops.triton.mamba3.mamba3_siso_combined import mamba3_siso_combined
+    from mamba_ssm.ops.tilelang.mamba3.mamba3_mimo import mamba3_mimo as mamba3_mimo_combined
     from mamba_ssm.ops.triton.layernorm_gated import RMSNorm as RMSNormGated
 except ImportError:
     raise ImportError("YOU ARE VERY CRYNGE, mamba_ssm with mamba3 is required for selective scan with mamba backend. Please install mamba_ssm")
@@ -1917,6 +1918,9 @@ class SS2Dv_Mamba3:
         rmsnorm=True,        # use RMSNormGated on output
         rope_fraction=0.5,   # fraction of d_state used for RoPE
         A_floor=1e-4,        # clamp floor for A
+        # MIMO options =========
+        is_mimo=False,       # use MIMO kernel (mamba3_mimo_combined)
+        mimo_rank=4,         # MIMO rank R; chunk_size should be <= 64//R
         # ======================
         forward_type="m3",
         channel_first=False,
@@ -1934,6 +1938,12 @@ class SS2Dv_Mamba3:
         self.channel_first = channel_first
         self.with_dconv = d_conv > 1
         self.A_floor = A_floor
+        self.is_mimo = is_mimo
+        self.mimo_rank = mimo_rank if is_mimo else 1
+        if is_mimo:
+            assert mamba3_mimo_combined is not None, (
+                "mamba3_mimo_combined not available. Install mamba_ssm with TileLang MIMO support."
+            )
         self.forward = self.forward_mamba3
 
         assert self.d_inner % headdim == 0, (
@@ -1944,6 +1954,7 @@ class SS2Dv_Mamba3:
 
         # RoPE configuration
         assert rope_fraction in [0.5, 1.0]
+        self.rotary_dim_divisor = int(2 / rope_fraction)
         self.split_tensor_size = int(d_state * rope_fraction)
         if self.split_tensor_size % 2 != 0:
             self.split_tensor_size -= 1
@@ -1973,9 +1984,14 @@ class SS2Dv_Mamba3:
             )
 
         # ---- x_proj: per direction projects to [dt(nheads), A(nheads), trap(nheads),
-        #              B(ngroups*d_state), C(ngroups*d_state), angles(num_rope_angles)] ----
+        #              B(ngroups*d_state[*mimo_rank]), C(ngroups*d_state[*mimo_rank]),
+        #              angles(num_rope_angles)] ----
         n_bc = self.ngroups * self.d_state
-        self._proj_dim = 3 * self.nheads + 2 * n_bc + self.num_rope_angles
+        # For MIMO, each of B and C has mimo_rank copies per group
+        n_bc_proj = n_bc * self.mimo_rank
+        self._proj_dim = 3 * self.nheads + 2 * n_bc_proj + self.num_rope_angles
+        self._n_bc = n_bc          # store for forward
+        self._n_bc_proj = n_bc_proj
         self.x_proj = Linear(
             self.d_inner, self.k_group * self._proj_dim,
             groups=self.k_group, bias=False, channel_first=True,
@@ -1995,14 +2011,22 @@ class SS2Dv_Mamba3:
 
         # ---- B/C biases and norms (Mamba3-specific) ----
         assert RMSNormGated is not None, "RMSNormGated not available"
+        # Always (K*nheads, mimo_rank, d_state); mimo_rank=1 for SISO (matches Mamba3 shape)
         self.B_bias = nn.Parameter(
-            torch.ones(self.k_group * self.nheads, self.d_state, dtype=torch.float32)
+            1 + torch.zeros(self.k_group * self.nheads, self.mimo_rank, self.d_state, dtype=torch.float32)
         )
         self.C_bias = nn.Parameter(
-            torch.ones(self.k_group * self.nheads, self.d_state, dtype=torch.float32)
+            1 + torch.zeros(self.k_group * self.nheads, self.mimo_rank, self.d_state, dtype=torch.float32)
         )
         self.B_norm = RMSNormGated(self.d_state, eps=1e-5)
         self.C_norm = RMSNormGated(self.d_state, eps=1e-5)
+
+        # ---- MIMO projection tensors ----
+        if is_mimo:
+            # (K*nheads, mimo_rank, headdim) — matches Mamba3's (nheads, mimo_rank, headdim)
+            self.mimo_x = nn.Parameter(torch.ones(self.k_group * self.nheads, mimo_rank, headdim) / mimo_rank)
+            self.mimo_z = nn.Parameter(torch.ones(self.k_group * self.nheads, mimo_rank, headdim))
+            self.mimo_o = nn.Parameter(torch.ones(self.k_group * self.nheads, mimo_rank, headdim) / mimo_rank)
 
         # ---- Optional RMSNormGated (like Mamba3's gated normalisation) ----
         self._use_rmsnorm_gated = False
@@ -2027,8 +2051,9 @@ class SS2Dv_Mamba3:
         L = H * W
         K = self.k_group
         nheads = self.nheads
-        n_bc = self.ngroups * self.d_state
-        P = self._proj_dim  # 3*nheads + 2*n_bc + num_rope_angles
+        n_bc      = self._n_bc       # ngroups * d_state
+        n_bc_proj = self._n_bc_proj  # n_bc * mimo_rank (== n_bc for SISO)
+        P = self._proj_dim  # 3*nheads + 2*n_bc_proj + num_rope_angles
 
         # 1. Cross-scan -> (B, K*D, L)
         xs = cross_scan_fn(x, in_channel_first=True, out_channel_first=True,
@@ -2037,11 +2062,11 @@ class SS2Dv_Mamba3:
         # 2. Project -> (B, K, P, L), split dt / dd_A / trap / B / C / angles
         xp = self.x_proj(xs.view(B, -1, L)).view(B, K, P, L)
         idx = 0
-        dts     = xp[:, :, idx:idx+nheads, :];       idx += nheads       # (B, K, nheads, L)
-        dd_As   = xp[:, :, idx:idx+nheads, :];       idx += nheads       # (B, K, nheads, L)
-        traps   = xp[:, :, idx:idx+nheads, :];       idx += nheads       # (B, K, nheads, L)
-        Bs      = xp[:, :, idx:idx+n_bc, :];         idx += n_bc         # (B, K, ngroups*d_state, L)
-        Cs      = xp[:, :, idx:idx+n_bc, :];         idx += n_bc         # (B, K, ngroups*d_state, L)
+        dts     = xp[:, :, idx:idx+nheads, :];            idx += nheads       # (B, K, nheads, L)
+        dd_As   = xp[:, :, idx:idx+nheads, :];            idx += nheads       # (B, K, nheads, L)
+        traps   = xp[:, :, idx:idx+nheads, :];            idx += nheads       # (B, K, nheads, L)
+        Bs      = xp[:, :, idx:idx+n_bc_proj, :];         idx += n_bc_proj    # (B, K, n_bc_proj, L)
+        Cs      = xp[:, :, idx:idx+n_bc_proj, :];         idx += n_bc_proj    # (B, K, n_bc_proj, L)
         angles  = xp[:, :, idx:idx+self.num_rope_angles, :]; idx += self.num_rope_angles  # (B, K, num_rope_angles, L)
 
         xs_4d = xs.view(B, K, D, L)  # (B, K, D, L)
@@ -2068,19 +2093,29 @@ class SS2Dv_Mamba3:
         # Trap: sigmoid -> (B, K*nheads, L)
         Trap = torch.sigmoid(traps.reshape(B, K * nheads, L).float())  # (B, K*nheads, L)
 
-        # B/C: reshape to (B, L, K*ngroups, d_state), apply norms
-        B_all = (Bs.view(B, K, self.ngroups, self.d_state, L)
-                 .permute(0, 4, 1, 2, 3)
-                 .reshape(B, L, K * self.ngroups, self.d_state)
+        # B/C: reshape and apply norms
+        # SISO: (B, L, K*ngroups, d_state)
+        # MIMO: (B, L, mimo_rank, K*ngroups, d_state)
+        R = self.mimo_rank
+        B_all = (Bs.view(B, K, self.ngroups, R, self.d_state, L)
+                 .permute(0, 5, 3, 1, 2, 4)   # (B, L, R, K, ngroups, d_state)
+                 .reshape(B, L, R, K * self.ngroups, self.d_state)
                  .contiguous())
-        C_all = (Cs.view(B, K, self.ngroups, self.d_state, L)
-                 .permute(0, 4, 1, 2, 3)
-                 .reshape(B, L, K * self.ngroups, self.d_state)
+        C_all = (Cs.view(B, K, self.ngroups, R, self.d_state, L)
+                 .permute(0, 5, 3, 1, 2, 4)
+                 .reshape(B, L, R, K * self.ngroups, self.d_state)
                  .contiguous())
 
-        # Apply RMSNorm to B and C
-        B_all = self.B_norm(B_all)
-        C_all = self.C_norm(C_all)
+        # Apply RMSNorm to B and C (over d_state dim)
+        # norm operates on last dim; flatten R into ngroups for efficiency
+        _bcshape = B_all.shape  # (B, L, R, K*ngroups, d_state)
+        B_all = self.B_norm(B_all.reshape(B, L, R * K * self.ngroups, self.d_state)).reshape(_bcshape)
+        C_all = self.C_norm(C_all.reshape(B, L, R * K * self.ngroups, self.d_state)).reshape(_bcshape)
+
+        if not self.is_mimo:
+            # Drop the trivial R=1 dim for SISO
+            B_all = B_all.squeeze(2)  # (B, L, K*ngroups, d_state)
+            C_all = C_all.squeeze(2)  # (B, L, K*ngroups, d_state)
 
         # Angles: (B, L, K*nheads, num_rope_angles)
         angles_all = (angles.view(B, K, self.num_rope_angles, L)
@@ -2091,28 +2126,50 @@ class SS2Dv_Mamba3:
                       .to(torch.float32)
                       .contiguous())
 
-        # Q_bias / K_bias: (K*nheads, d_state)
-        Q_bias = self.C_bias  # (K*nheads, d_state)
-        K_bias = self.B_bias  # (K*nheads, d_state)
+        # Q_bias / K_bias: always (K*nheads, mimo_rank, d_state); squeeze rank dim for SISO kernel
+        Q_bias = self.C_bias.squeeze(1) if not self.is_mimo else self.C_bias  # SISO: (K*nheads, d_state)
+        K_bias = self.B_bias.squeeze(1) if not self.is_mimo else self.B_bias  # MIMO: (K*nheads, R, d_state)
 
         # D: (K*nheads,)
         D_param = self.D.float()
 
-        # 4. Call mamba3_siso_combined
-        y_all = mamba3_siso_combined(
-            Q=C_all,
-            K=B_all,
-            V=x_all,
-            ADT=ADT,
-            DT=DT,
-            Trap=Trap,
-            Q_bias=Q_bias,
-            K_bias=K_bias,
-            Angles=angles_all,
-            D=D_param,
-            Z=None,  # gating handled outside the kernel
-            chunk_size=self.chunk_size,
-        )  # (B, L, K*nheads, headdim)
+        # 4. Call SISO or MIMO kernel
+        if not self.is_mimo:
+            y_all = mamba3_siso_combined(
+                Q=C_all,
+                K=B_all,
+                V=x_all,
+                ADT=ADT,
+                DT=DT,
+                Trap=Trap,
+                Q_bias=Q_bias,
+                K_bias=K_bias,
+                Angles=angles_all,
+                D=D_param,
+                Z=None,  # gating handled outside the kernel
+                chunk_size=self.chunk_size,
+            )  # (B, L, K*nheads, headdim)
+        else:
+            _dt = x_all.dtype  # MIMO kernel requires most float tensors in the same dtype
+            y_all = mamba3_mimo_combined(
+                Q=C_all.to(_dt),
+                K=B_all.to(_dt),
+                V=x_all,
+                ADT=ADT.float(),
+                DT=DT.float(),
+                Trap=Trap.to(_dt),
+                Q_bias=Q_bias.float(),
+                K_bias=K_bias.float(),
+                MIMO_V=self.mimo_x.float(),
+                MIMO_Z=self.mimo_z.float(),
+                MIMO_Out=self.mimo_o.float(),
+                Angles=angles_all.float(),
+                D=D_param.float(),
+                Z=None,  # gating handled outside the kernel
+                chunk_size=self.chunk_size,
+                rotary_dim_divisor=self.rotary_dim_divisor,
+                dtype=_dt,
+            )  # (B, L, K*nheads, headdim)  [mimo_o reduces mimo_rank dim]
 
         # 5. Cross-merge: (B, K, D, H, W) -> (B, D, H, W)
         ys = (y_all.reshape(B, L, K, nheads, self.headdim)
@@ -2490,6 +2547,9 @@ class VSSBlock_Mamba3(nn.Module):
         ssm_rmsnorm: bool = True,
         ssm_rope_fraction: float = 0.5,
         ssm_A_floor: float = 1e-4,
+        # MIMO ========================
+        is_mimo: bool = False,
+        mimo_rank: int = 4,
         # =============================
         mlp_ratio=4.0,
         mlp_act_layer=nn.GELU,
@@ -2528,6 +2588,8 @@ class VSSBlock_Mamba3(nn.Module):
                 rmsnorm=ssm_rmsnorm,
                 rope_fraction=ssm_rope_fraction,
                 A_floor=ssm_A_floor,
+                is_mimo=is_mimo,
+                mimo_rank=mimo_rank,
             )
 
         self.drop_path = DropPath(drop_path)
