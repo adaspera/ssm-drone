@@ -234,3 +234,51 @@ Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - 
 +=========================================================================================+
 | 1   PyTorch   ❎         8.5         -                     -                        -   |
 +-----------------------------------------------------------------------------------------+
+
+Benchmarks complete for /run/media/justas/Storage/Bakis/pretrained/yolo26n-merged3v/weights/best.pt on merged3v.yaml at imgsz=640 (44.95s)
+Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - ❌️ Export failed
++--------------------------------------------------------------------------------------------+
+|     Format    Status❔   Size (MB)   metrics/mAP50-95(B)   Inference time (ms/im)   FPS    |
++============================================================================================+
+| 1   PyTorch   ✅         5.1         0.547                 8.51                     117.54 |
++--------------------------------------------------------------------------------------------+
+
+Benchmarks complete for /run/media/justas/Storage/Bakis/runs/detect/yolo26-v-mamba-attention-merged3v/weights/best.pt on merged3v.yaml at imgsz=640 (53.03s)
+Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - ❌️ Export failed
++-------------------------------------------------------------------------------------------+
+|     Format    Status❔   Size (MB)   metrics/mAP50-95(B)   Inference time (ms/im)   FPS   |
++===========================================================================================+
+| 1   PyTorch   ✅         6.8         0.5463                10.33                    96.77 |
++-------------------------------------------------------------------------------------------+
+
+Benchmarks complete for /run/media/justas/Storage/Bakis/runs/detect/yolo26-v-mamba-attention-merged3v/weights/best.pt on merged3v.yaml at imgsz=640 (54.65s)
+Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - ❌️ Export failed
++-------------------------------------------------------------------------------------------+
+|     Format   Status❔   Size (MB)   metrics/mAP50-95(B)   Inference time (ms/im)   FPS    |
++===========================================================================================+
+| 1   ONNX     ✅         12.7        0.5167                3.57                     279.89 |
++-------------------------------------------------------------------------------------------+
+
+Benchmarks complete for /run/media/justas/Storage/Bakis/pretrained/yolo26n-merged3v/weights/best.pt on merged3v.yaml at imgsz=640 (31.78s)
+Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - ❌️ Export failed
++-------------------------------------------------------------------------------------------+
+|     Format   Status❔   Size (MB)   metrics/mAP50-95(B)   Inference time (ms/im)   FPS    |
++===========================================================================================+
+| 1   ONNX     ✅         9.4         0.5472                3.48                     287.57 |
++-------------------------------------------------------------------------------------------+
+
+Benchmarks complete for /run/media/justas/Storage/Bakis/pretrained/yolo26-v-mamba3-mimo-merged3v2/weights/best.pt on merged3v.yaml at imgsz=640 (664.06s)
+Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - ❌️ Export failed
++------------------------------------------------------------------------------------------+
+|     Format    Status❔   Size (MB)   metrics/mAP50-95(B)   Inference time (ms/im)   FPS  |
++==========================================================================================+
+| 1   PyTorch   ✅         49.0        0.4872                165.31                   6.05 |
++------------------------------------------------------------------------------------------+
+
+Benchmarks complete for /run/media/justas/Storage/Bakis/pretrained/yolo26-v-mamba3-mimo-merged3v2/weights/best.pt on merged3v.yaml at imgsz=640 (88.66s)
+Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - ❌️ Export failed
++-------------------------------------------------------------------------------------------+
+|     Format    Status❔   Size (MB)   metrics/mAP50-95(B)   Inference time (ms/im)   FPS   |
++===========================================================================================+
+| 1   PyTorch   ✅         49.0        0.4872                20.03                    49.92 |
++-------------------------------------------------------------------------------------------+

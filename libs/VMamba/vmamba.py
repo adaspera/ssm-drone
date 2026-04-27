@@ -2011,12 +2011,14 @@ class SS2Dv_Mamba3:
 
         # ---- B/C biases and norms (Mamba3-specific) ----
         assert RMSNormGated is not None, "RMSNormGated not available"
-        # Always (K*nheads, mimo_rank, d_state); mimo_rank=1 for SISO (matches Mamba3 shape)
+        # SISO: (K*nheads, d_state) — 2D, Muon-compatible
+        # MIMO: (K*nheads, mimo_rank, d_state) — 3D
+        _bias_shape = (self.k_group * self.nheads, self.mimo_rank, self.d_state) if is_mimo else (self.k_group * self.nheads, self.d_state)
         self.B_bias = nn.Parameter(
-            1 + torch.zeros(self.k_group * self.nheads, self.mimo_rank, self.d_state, dtype=torch.float32)
+            1 + torch.zeros(*_bias_shape, dtype=torch.float32)
         )
         self.C_bias = nn.Parameter(
-            1 + torch.zeros(self.k_group * self.nheads, self.mimo_rank, self.d_state, dtype=torch.float32)
+            1 + torch.zeros(*_bias_shape, dtype=torch.float32)
         )
         self.B_norm = RMSNormGated(self.d_state, eps=1e-5)
         self.C_norm = RMSNormGated(self.d_state, eps=1e-5)
@@ -2126,9 +2128,9 @@ class SS2Dv_Mamba3:
                       .to(torch.float32)
                       .contiguous())
 
-        # Q_bias / K_bias: always (K*nheads, mimo_rank, d_state); squeeze rank dim for SISO kernel
-        Q_bias = self.C_bias.squeeze(1) if not self.is_mimo else self.C_bias  # SISO: (K*nheads, d_state)
-        K_bias = self.B_bias.squeeze(1) if not self.is_mimo else self.B_bias  # MIMO: (K*nheads, R, d_state)
+        # Q_bias / K_bias: SISO: (K*nheads, d_state); MIMO: (K*nheads, mimo_rank, d_state)
+        Q_bias = self.C_bias
+        K_bias = self.B_bias
 
         # D: (K*nheads,)
         D_param = self.D.float()

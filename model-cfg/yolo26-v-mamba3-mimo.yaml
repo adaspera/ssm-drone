@@ -1,7 +1,9 @@
 # yolo26-v-mamba3-mimo.yaml
 # Same structure as yolo26-v-mamba3.yaml but uses MIMO Mamba3 kernel
 # VSSMBlock_Mamba3_MIMO args: [dim, d_state, ssm_ratio, d_conv, headdim, chunk_size, ngroups, mimo_rank]
-# chunk_size <= 64 // (mimo_rank*2) to avoid smem over-allocation; min 16 required by TileLang warp partition
+# headdim=32 keeps smem under 99 KB optin limit on RTX 3070/5060Ti
+# chunk_size=16 satisfies TileLang warp partition (m_warp*n_warp==4)
+# ngroups=nheads (G==H) to satisfy MIMO backward kernel constraint (G==1 or G==H)
 
 nc: 1
 end2end: True
@@ -13,16 +15,16 @@ backbone:
   - [-1, 1, Conv, [32, 3, 2]]               # 1-P2/4
   - [-1, 1, Conv, [64, 3, 2]]               # 2-P3/8
 
-  # P3: d_inner=128, headdim=64 → 2 heads, chunk_size=16, mimo_rank=2
-  - [-1, 1, VSSMBlock_Mamba3_MIMO, [64, 128, 2.0, 3, 64, 16, 1, 2]]   # 3-MIMO-VSS at P3/8
+  # P3: d_inner=128, headdim=32 → nheads=4, ngroups=4 (G=K*ngroups=16=K*nheads=H ✓)
+  - [-1, 1, VSSMBlock_Mamba3_MIMO, [64, 128, 2.0, 3, 32, 16, 4, 2]]   # 3-MIMO-VSS at P3/8
 
   - [-1, 1, Conv, [128, 3, 2]]              # 4-P4/16
-  # P4: d_inner=256, headdim=64 → 4 heads
-  - [-1, 1, VSSMBlock_Mamba3_MIMO, [128, 128, 2.0, 3, 64, 16, 1, 2]]  # 5-MIMO-VSS at P4/16
+  # P4: d_inner=256, headdim=32 → nheads=8, ngroups=8
+  - [-1, 1, VSSMBlock_Mamba3_MIMO, [128, 128, 2.0, 3, 32, 16, 8, 2]]  # 5-MIMO-VSS at P4/16
 
   - [-1, 1, Conv, [256, 3, 2]]              # 6-P5/32
-  # P5: d_inner=512, headdim=64 → 8 heads
-  - [-1, 1, VSSMBlock_Mamba3_MIMO, [256, 128, 2.0, 3, 64, 16, 1, 2]]  # 7-MIMO-VSS at P5/32
+  # P5: d_inner=512, headdim=32 → nheads=16, ngroups=16
+  - [-1, 1, VSSMBlock_Mamba3_MIMO, [256, 128, 2.0, 3, 32, 16, 16, 2]]  # 7-MIMO-VSS at P5/32
 
   - [-1, 1, SPPF, [256, 5, 3, True]]       # 8
   - [-1, 1, C2PSA, [256]]                  # 9

@@ -88,3 +88,13 @@ rsync -avz --progress /run/media/justas/Storage/Bakis/data/mergedv3/ bakis-vast:
 
 Remember installing older timm: timm 0.4.12
 dont remember why
+
+
+### Mamab3 MIMO
+
+Massive downside is that it only supports ngroups = nheads, this means that we
+cant have K(cross scans)\*nheads. So we have to merge with batch B\*K or
+have a group for each head - expensive.
+
+K * ngroups == K * nheads   --> ngroups = nheads
+4 * 1 != 4 * 4

@@ -23,8 +23,10 @@ yolo26-v-mamba-attention-merged3v,100,0.8322,0.5142,120.3
 yolo26-v-mamba-neck-merged3v,100,0.8405,0.5221,247.6
 yolo26n-merged3v,100,0.8631,0.5464,141.2
 yolo26-v-mamba-full-600-merged3v4,600,0.883,0.5679,340.6
-yolo26-v-mamba-pure-neck-merged3v,600,0.883,0.5679,340.6
 yolo26-v-mamba-pure-merged3v-imgsz1280,50,0.8849,0.5808,1743.8
 yolo26n-600-merged3v,600,0.9022,0.5946,151.1
 yolo26s-merged3v,100,0.9082,0.5986,211.7
 yolo26n-merged3v-imgsz1280,50,0.9039,0.6055,785.4
+rtdetr-v-mamba-merged3v5,100,0.8309,0.4823,1729.8
+yolo26-v-mamba-pure-neck-merged3v,600,0.883,0.5679,340.6
+yolo26-v-mamba3-mimo-merged3v2,100,0.7969,0.4868,688.3
