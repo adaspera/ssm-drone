@@ -32,10 +32,4 @@
 
 # Ideas
 
-Gal heatmap pabandyt
-
-Neck, head, full body
-
-RTDETRDecoder clone with mamba3
-
-wang mamba yolo tik su attention centre
+vmamba2 rerrun with dynamic optimizer

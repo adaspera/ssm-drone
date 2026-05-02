@@ -2014,12 +2014,9 @@ class SS2Dv_Mamba3:
         # SISO: (K*nheads, d_state) — 2D, Muon-compatible
         # MIMO: (K*nheads, mimo_rank, d_state) — 3D
         _bias_shape = (self.k_group * self.nheads, self.mimo_rank, self.d_state) if is_mimo else (self.k_group * self.nheads, self.d_state)
-        self.B_bias = nn.Parameter(
-            1 + torch.zeros(*_bias_shape, dtype=torch.float32)
-        )
-        self.C_bias = nn.Parameter(
-            1 + torch.zeros(*_bias_shape, dtype=torch.float32)
-        )
+        self.B_bias = nn.Parameter(1 + torch.zeros(*_bias_shape, dtype=torch.float32))
+        self.C_bias = nn.Parameter(1 + torch.zeros(*_bias_shape, dtype=torch.float32))
+        
         self.B_norm = RMSNormGated(self.d_state, eps=1e-5)
         self.C_norm = RMSNormGated(self.d_state, eps=1e-5)
 
