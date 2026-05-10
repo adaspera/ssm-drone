@@ -7,6 +7,11 @@ Experiments for drone detection with YOLO26, VMamba, and Mamba-based variants.
 - `python train.py` trains the YOLO26 + VMamba/Mamba models.
 - `python rf_detr_train.py` runs the RF-DETR baseline utilities.
 
+## Dependancies
+
+- [mamba_ssm](https://github.com/state-spaces/mamba)
+- Ultralytics and its dependancies. The modified version available inside libs/ and should be installed as `pip install -e .`
+
 ## Notes
 
 - `mamba_ssm` lib in this workspace is expected to build against CUDA 12.8.
