@@ -1676,15 +1676,13 @@ class SS2Dv_Mamba2:
       - x_proj projects to [dt, B, C]   — dt is (nheads,) per direction
       - SSD chunked-parallel scan        — faster on long sequences than recurrent scan
       - Optional RMSNormGated output     — matches Mamba2's gated normalisation
-
-    Use via forward_type="ssd" (or "ssd_noz", "ssd_nozact", etc.).
     """
 
     def __initm2__(
         self,
         # basic dims ===========
         d_model=96,
-        d_state=64,          # Mamba2 default (vs 16 in Mamba1)
+        d_state=64,
         ssm_ratio=2.0,
         act_layer=nn.SiLU,
         # dwconv ===============
@@ -1723,20 +1721,17 @@ class SS2Dv_Mamba2:
         assert self.d_inner % headdim == 0, (
             f"d_inner ({self.d_inner}) must be divisible by headdim ({headdim})"
         )
-        self.nheads = self.d_inner // headdim  # per scan direction
+        self.nheads = self.d_inner // headdim
 
-        # Reuse SS2Dv2 postfix helpers for forward_type modifiers
         checkpostfix = SS2Dv2.checkpostfix
         self.disable_z, forward_type      = checkpostfix("_noz",    forward_type)
         self.disable_z_act, forward_type  = checkpostfix("_nozact", forward_type)
         self.out_norm, forward_type       = SS2Dv2.get_outnorm(forward_type, self.d_inner, channel_first)
 
-        # ---- in_proj: d_model → d_inner [+ d_inner for z gate] ----
         d_proj = self.d_inner if self.disable_z else self.d_inner * 2
         self.in_proj = Linear(self.d_model, d_proj, bias=bias, channel_first=channel_first)
         self.act = act_layer()
 
-        # ---- 2D depthwise conv (channel-first) ----
         if self.with_dconv:
             self.conv2d = nn.Conv2d(
                 in_channels=self.d_inner,
@@ -1747,20 +1742,18 @@ class SS2Dv_Mamba2:
                 padding=(d_conv - 1) // 2,
             )
 
-        # ---- x_proj: d_inner → [dt(nheads), B(ngroups*d_state), C(ngroups*d_state)] ----
-        # Grouped projection across all 4 directions at once (channel_first=True input)
+        # Grouped projection across all 4 directions at once
         self._proj_dim = self.nheads + 2 * self.ngroups * self.d_state
         self.x_proj = Linear(
             self.d_inner, self.k_group * self._proj_dim,
             groups=self.k_group, bias=False, channel_first=True,
         )
 
-        # ---- A_log: (K * nheads,) — scalar decay per head per direction ----
+        # (K * nheads,) scalar decay per head per direction
         A = torch.empty(self.k_group * self.nheads).uniform_(1, 16)
         self.A_log = nn.Parameter(torch.log(A).to(torch.float32))
         self.A_log._no_weight_decay = True
 
-        # ---- dt_bias: (K * nheads,) — direct softplus bias, no dt_rank projection ----
         dt = torch.exp(
             torch.rand(self.k_group * self.nheads) * (math.log(dt_max) - math.log(dt_min))
             + math.log(dt_min)
@@ -1768,11 +1761,9 @@ class SS2Dv_Mamba2:
         self.dt_bias = nn.Parameter(dt + torch.log(-torch.expm1(-dt)))
         self.dt_bias._no_weight_decay = True
 
-        # ---- D skip parameter: (K * nheads,) ----
         self.D = nn.Parameter(torch.ones(self.k_group * self.nheads))
         self.D._no_weight_decay = True
 
-        # ---- Optional RMSNormGated (like Mamba2, requires z gate) ----
         self._use_rmsnorm_gated = False
         if rmsnorm and not self.disable_z:
             from mamba_ssm.ops.triton.layernorm_gated import RMSNorm as RMSNormGated
@@ -1782,11 +1773,9 @@ class SS2Dv_Mamba2:
             )
             self._use_rmsnorm_gated = True
 
-        # ---- out_proj ----
         self.out_proj = Linear(self.d_inner, self.d_model, bias=bias, channel_first=channel_first)
         self.dropout = nn.Dropout(dropout) if dropout > 0. else nn.Identity()
 
-    # TODO REMOVE ALL OPTIONS
     def forward_core_mamba2(self, x: torch.Tensor, scan_mode=0):
         """
         x: (B, d_inner, H, W)  channel-first
@@ -1800,22 +1789,20 @@ class SS2Dv_Mamba2:
         P = self._proj_dim          # nheads + 2*ngroups*d_state
         n_bc = self.ngroups * self.d_state
 
-        # 1. Cross-scan → (B, K*D, L)
+        # (B, K*D, L)
         xs = cross_scan_fn(x, in_channel_first=True, out_channel_first=True,
                            scans=scan_mode)
 
-        # 2. Project → (B, K, P, L), split dt / B_ssm / C_ssm
+        # (B, K, P, L)
         xp = self.x_proj(xs.view(B, -1, L)).view(B, K, P, L)
         dts = xp[:, :, :nheads, :]               # (B, K, nheads, L)
         Bs  = xp[:, :, nheads:nheads + n_bc, :]  # (B, K, ngroups*d_state, L)
         Cs  = xp[:, :, nheads + n_bc:, :]        # (B, K, ngroups*d_state, L)
 
         A = -torch.exp(self.A_log.float())        # (K * nheads,)
-        xs_4d = xs.view(B, K, D, L)              # (B, K, D, L)
+        xs_4d = xs.view(B, K, D, L)               # (B, K, D, L)
 
-        # 3. Fused SSM kernel: all K directions as K*nheads heads in one call.
-        # The kernel treats every head independently, so directions never interact.
-        # B/C are stacked as K*ngroups groups → heads_per_group = nheads/ngroups unchanged.
+        # K*nheads
         x_all  = xs_4d.view(B, K, nheads, self.headdim, L).permute(0, 4, 1, 2, 3).reshape(B, L, K * nheads, self.headdim).contiguous()   # (B, L, K*nheads, headdim)
         dt_all = dts.permute(0, 3, 1, 2).reshape(B, L, K * nheads).contiguous()                                                           # (B, L, K*nheads)
         B_all  = Bs.view(B, K, self.ngroups, self.d_state, L).permute(0, 4, 1, 2, 3).reshape(B, L, K * self.ngroups, self.d_state).contiguous()  # (B, L, K*ngroups, d_state)
@@ -1830,7 +1817,6 @@ class SS2Dv_Mamba2:
             dt_softplus=True,
         )  # (B, L, K*nheads, headdim)
 
-        # 4. Cross-merge: (B, K, D, H, W) → (B, D, H, W)
         ys = y_all.reshape(B, L, K, nheads, self.headdim).permute(0, 2, 3, 4, 1).contiguous().reshape(B, K, D, H, W)
         y = cross_merge_fn(ys, in_channel_first=True, out_channel_first=True,
                            scans=scan_mode)
@@ -1880,18 +1866,8 @@ class SS2Dv_Mamba2:
 
 
 class SS2Dv_Mamba3:
-    """SS2D variant using Mamba3's SISO kernel (mamba3_siso_combined) with VMamba's
+    """SS2D variant using Mamba kernel with VMamba's
     4-direction cross-scan for 2D spatial feature maps.
-
-    Key differences from SS2Dv_Mamba2 (Mamba2 SSD):
-      - A is projected per-token (dd_A), then computed as -softplus(dd_A) clamped
-      - ADT = A * DT is passed as a combined tensor
-      - Trap (trapezoidal integration weight) is a new per-head parameter
-      - RoPE rotary positional embeddings via per-token Angles
-      - B and C go through RMSNormGated with learnable biases (B_bias, C_bias)
-      - Uses mamba3_siso_combined kernel instead of mamba_chunk_scan_combined
-
-    Use via forward_type="m3" (or "m3_noz", "m3_nozact", etc.).
     """
 
     def __initm3__(
@@ -1914,13 +1890,13 @@ class SS2Dv_Mamba3:
         # Mamba3-specific ======
         headdim=64,
         ngroups=1,           # number of B/C groups
-        chunk_size=64,       # recommended: 64 for SISO
-        rmsnorm=True,        # use RMSNormGated on output
+        chunk_size=64,       # Recommended: 64 for SISO, 64/mimo_rank for MIMO
+        rmsnorm=True,        # use RMSNormGated on output (needed for mixed models)
         rope_fraction=0.5,   # fraction of d_state used for RoPE
         A_floor=1e-4,        # clamp floor for A
         # MIMO options =========
         is_mimo=False,       # use MIMO kernel (mamba3_mimo_combined)
-        mimo_rank=4,         # MIMO rank R; chunk_size should be <= 64//R
+        mimo_rank=4,         # MIMO rank R
         # ======================
         forward_type="m3",
         channel_first=False,
@@ -1949,7 +1925,7 @@ class SS2Dv_Mamba3:
         assert self.d_inner % headdim == 0, (
             f"d_inner ({self.d_inner}) must be divisible by headdim ({headdim})"
         )
-        self.nheads = self.d_inner // headdim  # per scan direction
+        self.nheads = self.d_inner // headdim
         self.num_bc_heads = ngroups
 
         # RoPE configuration
@@ -1961,18 +1937,15 @@ class SS2Dv_Mamba3:
         self.num_rope_angles = self.split_tensor_size // 2
         assert self.num_rope_angles > 0
 
-        # Reuse SS2Dv2 postfix helpers for forward_type modifiers
         checkpostfix = SS2Dv2.checkpostfix
         self.disable_z, forward_type      = checkpostfix("_noz",    forward_type)
         self.disable_z_act, forward_type  = checkpostfix("_nozact", forward_type)
         self.out_norm, forward_type       = SS2Dv2.get_outnorm(forward_type, self.d_inner, channel_first)
 
-        # ---- in_proj: d_model -> d_inner [+ d_inner for z gate] ----
         d_proj = self.d_inner if self.disable_z else self.d_inner * 2
         self.in_proj = Linear(self.d_model, d_proj, bias=bias, channel_first=channel_first)
         self.act = act_layer()
 
-        # ---- 2D depthwise conv (channel-first) ----
         if self.with_dconv:
             self.conv2d = nn.Conv2d(
                 in_channels=self.d_inner,
@@ -1983,21 +1956,16 @@ class SS2Dv_Mamba3:
                 padding=(d_conv - 1) // 2,
             )
 
-        # ---- x_proj: per direction projects to [dt(nheads), A(nheads), trap(nheads),
-        #              B(ngroups*d_state[*mimo_rank]), C(ngroups*d_state[*mimo_rank]),
-        #              angles(num_rope_angles)] ----
         n_bc = self.ngroups * self.d_state
-        # For MIMO, each of B and C has mimo_rank copies per group
         n_bc_proj = n_bc * self.mimo_rank
         self._proj_dim = 3 * self.nheads + 2 * n_bc_proj + self.num_rope_angles
-        self._n_bc = n_bc          # store for forward
+        self._n_bc = n_bc
         self._n_bc_proj = n_bc_proj
         self.x_proj = Linear(
             self.d_inner, self.k_group * self._proj_dim,
             groups=self.k_group, bias=False, channel_first=True,
         )
 
-        # ---- dt_bias: (K * nheads,) — direct softplus bias ----
         _dt = torch.exp(
             torch.rand(self.k_group * self.nheads) * (math.log(dt_max) - math.log(dt_min))
             + math.log(dt_min)
@@ -2005,14 +1973,11 @@ class SS2Dv_Mamba3:
         self.dt_bias = nn.Parameter(_dt + torch.log(-torch.expm1(-_dt)))
         self.dt_bias._no_weight_decay = True
 
-        # ---- D skip parameter: (K * nheads,) ----
         self.D = nn.Parameter(torch.ones(self.k_group * self.nheads))
         self.D._no_weight_decay = True
 
-        # ---- B/C biases and norms (Mamba3-specific) ----
         assert RMSNormGated is not None, "RMSNormGated not available"
-        # SISO: (K*nheads, d_state) — 2D, Muon-compatible
-        # MIMO: (K*nheads, mimo_rank, d_state) — 3D
+
         _bias_shape = (self.k_group * self.nheads, self.mimo_rank, self.d_state) if is_mimo else (self.k_group * self.nheads, self.d_state)
         self.B_bias = nn.Parameter(1 + torch.zeros(*_bias_shape, dtype=torch.float32))
         self.C_bias = nn.Parameter(1 + torch.zeros(*_bias_shape, dtype=torch.float32))
@@ -2020,14 +1985,11 @@ class SS2Dv_Mamba3:
         self.B_norm = RMSNormGated(self.d_state, eps=1e-5)
         self.C_norm = RMSNormGated(self.d_state, eps=1e-5)
 
-        # ---- MIMO projection tensors ----
         if is_mimo:
-            # (K*nheads, mimo_rank, headdim) — matches Mamba3's (nheads, mimo_rank, headdim)
             self.mimo_x = nn.Parameter(torch.ones(self.k_group * self.nheads, mimo_rank, headdim) / mimo_rank)
             self.mimo_z = nn.Parameter(torch.ones(self.k_group * self.nheads, mimo_rank, headdim))
             self.mimo_o = nn.Parameter(torch.ones(self.k_group * self.nheads, mimo_rank, headdim) / mimo_rank)
 
-        # ---- Optional RMSNormGated (like Mamba3's gated normalisation) ----
         self._use_rmsnorm_gated = False
         if rmsnorm and not self.disable_z:
             self.norm_ssm = RMSNormGated(
@@ -2036,7 +1998,6 @@ class SS2Dv_Mamba3:
             )
             self._use_rmsnorm_gated = True
 
-        # ---- out_proj ----
         self.out_proj = Linear(self.d_inner, self.d_model, bias=bias, channel_first=channel_first)
         self.dropout = nn.Dropout(dropout) if dropout > 0. else nn.Identity()
 
@@ -2050,15 +2011,12 @@ class SS2Dv_Mamba3:
         L = H * W
         K = self.k_group
         nheads = self.nheads
-        n_bc      = self._n_bc       # ngroups * d_state
-        n_bc_proj = self._n_bc_proj  # n_bc * mimo_rank (== n_bc for SISO)
-        P = self._proj_dim  # 3*nheads + 2*n_bc_proj + num_rope_angles
+        n_bc_proj = self._n_bc_proj 
+        P = self._proj_dim 
 
-        # 1. Cross-scan -> (B, K*D, L)
         xs = cross_scan_fn(x, in_channel_first=True, out_channel_first=True,
                            scans=scan_mode)
 
-        # 2. Project -> (B, K, P, L), split dt / dd_A / trap / B / C / angles
         xp = self.x_proj(xs.view(B, -1, L)).view(B, K, P, L)
         idx = 0
         dts     = xp[:, :, idx:idx+nheads, :];            idx += nheads       # (B, K, nheads, L)
@@ -2068,36 +2026,27 @@ class SS2Dv_Mamba3:
         Cs      = xp[:, :, idx:idx+n_bc_proj, :];         idx += n_bc_proj    # (B, K, n_bc_proj, L)
         angles  = xp[:, :, idx:idx+self.num_rope_angles, :]; idx += self.num_rope_angles  # (B, K, num_rope_angles, L)
 
-        xs_4d = xs.view(B, K, D, L)  # (B, K, D, L)
+        xs_4d = xs.view(B, K, D, L)
 
-        # 3. Reshape and compute Mamba3-specific quantities:
-        # Merge K directions into the head dimension for a single fused kernel call,
-        # just like SS2Dv_Mamba2 does.
-
-        # V (input): (B, L, K*nheads, headdim)
         x_all = (xs_4d.view(B, K, nheads, self.headdim, L)
                  .permute(0, 4, 1, 2, 3)
                  .reshape(B, L, K * nheads, self.headdim)
                  .contiguous())
 
-        # DT: softplus(dt_raw + dt_bias) -> (B, K*nheads, L)
-        dt_flat = dts.reshape(B, K * nheads, L).contiguous()  # (B, K*nheads, L)
+        dt_flat = dts.reshape(B, K * nheads, L).contiguous()
         DT = F.softplus(dt_flat.float() + self.dt_bias.float().unsqueeze(0).unsqueeze(-1))  # (B, K*nheads, L)
 
-        # A: -softplus(dd_A) clamped -> (B, K*nheads, L)
         _A = -F.softplus(dd_As.reshape(B, K * nheads, L).float())
         _A = torch.clamp(_A, max=-self.A_floor)
-        ADT = _A * DT  # (B, K*nheads, L)
+        ADT = _A * DT
 
-        # Trap: sigmoid -> (B, K*nheads, L)
-        Trap = torch.sigmoid(traps.reshape(B, K * nheads, L).float())  # (B, K*nheads, L)
+        Trap = torch.sigmoid(traps.reshape(B, K * nheads, L).float())
 
-        # B/C: reshape and apply norms
         # SISO: (B, L, K*ngroups, d_state)
         # MIMO: (B, L, mimo_rank, K*ngroups, d_state)
         R = self.mimo_rank
         B_all = (Bs.view(B, K, self.ngroups, R, self.d_state, L)
-                 .permute(0, 5, 3, 1, 2, 4)   # (B, L, R, K, ngroups, d_state)
+                 .permute(0, 5, 3, 1, 2, 4)
                  .reshape(B, L, R, K * self.ngroups, self.d_state)
                  .contiguous())
         C_all = (Cs.view(B, K, self.ngroups, R, self.d_state, L)
@@ -2105,18 +2054,15 @@ class SS2Dv_Mamba3:
                  .reshape(B, L, R, K * self.ngroups, self.d_state)
                  .contiguous())
 
-        # Apply RMSNorm to B and C (over d_state dim)
-        # norm operates on last dim; flatten R into ngroups for efficiency
-        _bcshape = B_all.shape  # (B, L, R, K*ngroups, d_state)
+        _bcshape = B_all.shape
         B_all = self.B_norm(B_all.reshape(B, L, R * K * self.ngroups, self.d_state)).reshape(_bcshape)
         C_all = self.C_norm(C_all.reshape(B, L, R * K * self.ngroups, self.d_state)).reshape(_bcshape)
 
         if not self.is_mimo:
-            # Drop the trivial R=1 dim for SISO
-            B_all = B_all.squeeze(2)  # (B, L, K*ngroups, d_state)
-            C_all = C_all.squeeze(2)  # (B, L, K*ngroups, d_state)
+            # Drop the R=1 dim for SISO
+            B_all = B_all.squeeze(2)
+            C_all = C_all.squeeze(2)
 
-        # Angles: (B, L, K*nheads, num_rope_angles)
         angles_all = (angles.view(B, K, self.num_rope_angles, L)
                       .permute(0, 3, 1, 2)          # (B, L, K, num_rope_angles)
                       .unsqueeze(3)                  # (B, L, K, 1, num_rope_angles)
@@ -2125,11 +2071,9 @@ class SS2Dv_Mamba3:
                       .to(torch.float32)
                       .contiguous())
 
-        # Q_bias / K_bias: SISO: (K*nheads, d_state); MIMO: (K*nheads, mimo_rank, d_state)
         Q_bias = self.C_bias
         K_bias = self.B_bias
 
-        # D: (K*nheads,)
         D_param = self.D.float()
 
         # 4. Call SISO or MIMO kernel
@@ -2149,7 +2093,7 @@ class SS2Dv_Mamba3:
                 chunk_size=self.chunk_size,
             )  # (B, L, K*nheads, headdim)
         else:
-            _dt = x_all.dtype  # MIMO kernel requires most float tensors in the same dtype
+            _dt = x_all.dtype
             y_all = mamba3_mimo_combined(
                 Q=C_all.to(_dt),
                 K=B_all.to(_dt),
@@ -2168,9 +2112,8 @@ class SS2Dv_Mamba3:
                 chunk_size=self.chunk_size,
                 rotary_dim_divisor=self.rotary_dim_divisor,
                 dtype=_dt,
-            )  # (B, L, K*nheads, headdim)  [mimo_o reduces mimo_rank dim]
+            )  # (B, L, K*nheads, headdim) MIMO rank is merged
 
-        # 5. Cross-merge: (B, K, D, H, W) -> (B, D, H, W)
         ys = (y_all.reshape(B, L, K, nheads, self.headdim)
               .permute(0, 2, 3, 4, 1)
               .contiguous()
@@ -2194,7 +2137,7 @@ class SS2Dv_Mamba3:
             x = self.conv2d(x)
         x = self.act(x)
 
-        y = self.forward_core_mamba3(x)  # (B, d_inner, H, W)
+        y = self.forward_core_mamba3(x)
 
         if not self.channel_first:
             y = y.permute(0, 2, 3, 1).contiguous()
@@ -2410,9 +2353,6 @@ class VSSBlock(nn.Module):
 class VSSBlock_Mamba2(nn.Module):
     """VSSBlock variant that uses the Mamba2 SSD kernel via SS2D(forward_type='ssd*').
 
-    Drop-in replacement for VSSBlock — same residual + MLP structure, but the
-    SSM op is backed by mamba_chunk_scan_combined with VMamba's 4-direction cross-scan.
-
     Extra parameters (Mamba2-specific):
         ssm_headdim  : head dimension inside SSD (d_inner must be divisible by this)
         ssm_ngroups  : number of B/C groups shared across heads
@@ -2512,9 +2452,6 @@ class VSSBlock_Mamba2(nn.Module):
 class VSSBlock_Mamba3(nn.Module):
     """VSSBlock variant that uses the Mamba3 SISO kernel via SS2D(forward_type='m3*').
 
-    Drop-in replacement for VSSBlock — same residual + MLP structure, but the
-    SSM op is backed by mamba3_siso_combined with VMamba's 4-direction cross-scan.
-
     Extra parameters (Mamba3-specific):
         ssm_headdim   : head dimension inside SSD (d_inner must be divisible by this)
         ssm_ngroups   : number of B/C groups shared across heads
@@ -2522,7 +2459,7 @@ class VSSBlock_Mamba3(nn.Module):
         ssm_rmsnorm   : use RMSNormGated on SSM output
         ssm_rope_fraction: fraction of d_state used for RoPE (0.5 or 1.0)
         ssm_A_floor   : clamp floor for A decay parameter
-        forward_type  : any "m3*" string, e.g. "m3", "m3_noz", "m3_nozact",
+        forward_type  : any "m3*" string, "m3", "m3_noz", "m3_nozact",
                         plus the usual outnorm postfixes
     """
 

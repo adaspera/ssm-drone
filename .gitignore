@@ -2,6 +2,10 @@ __pycache__/
 .vscode/
 .github/
 .directory
+
+benchmarks.log
+notes.md
+
 /data/
 
 runs/

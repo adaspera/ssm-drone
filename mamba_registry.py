@@ -4,84 +4,14 @@ import os
 
 # Ensure workspace root is on path so mamba_decoder.py can be found
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.append('./libs/VMamba')  # Add VMamba to path
+sys.path.append('./libs/VMamba')
 
-import torch
 import torch.nn as nn
 from ultralytics.nn.tasks import parse_model
 import ultralytics.nn.modules as modules
 
-import vmamba
 from vmamba import VSSBlock, VSSBlock_Mamba2, VSSBlock_Mamba3
 
-from mamba_block import Mamba2DStable
-from vmamba_block import VMamba2DBlock
-from mamba_ssm import Mamba2
-
-class MambaBlock(nn.Module):
-    def __init__(self, *args, **kwargs):
-        super().__init__()
-
-        if len(args) >= 4:
-            print(args)
-            input_chanels, output_channels, d_state, expand = args[0], args[1], args[2], args[3]
-            d_conv = args[4] if len(args) > 4 else 4 
-        else: 
-            raise Exception("Wrong arg count")
-
-        if not hasattr(self, 'mamba'):
-            self.mamba = Mamba2DStable(
-                dim=input_chanels,  # Use actual input channels
-                d_state=d_state,
-                expand=expand,
-                d_conv=d_conv
-            )
-            
-            # Only add projection if channels need to change
-            if input_chanels != output_channels:
-                self.proj = nn.Conv2d(input_chanels, output_channels, 1)
-            else:
-                self.proj = None
-    
-    def forward(self, x):
-        self.mamba.to(x.device)
-        x_out = self.mamba(x)
-        
-        if self.proj:
-            self.proj.to(x.device)
-            x_out = self.proj(x_out)
-        
-        return x_out
-
-class VMambaBlock(nn.Module):
-    def __init__(self, *args, **kwargs):
-        super().__init__()
-
-        if len(args) >= 4:
-            print(args)
-            input_chanels, d_state, expand, d_conv = args[0], args[1], args[2], args[3]
-            if len(args) > 4:
-                mamba_type = args[4]
-            else:
-                mamba_type = 'v1'
-        else: 
-            raise Exception("Wrong arg count")
-
-        if not hasattr(self, 'mamba'):
-            self.mamba = VMamba2DBlock(
-                dim=input_chanels,  # Use actual input channels
-                d_state=d_state,
-                expand=expand,
-                d_conv=d_conv,
-                mamba_type=mamba_type
-            )
-
-    
-    def forward(self, x):
-        self.mamba.to(x.device)
-        x_out = self.mamba(x)
-        
-        return x_out
 
 class VSSMBlock(nn.Module):
     """Wrapper around VMamba's VSSBlock for YOLO integration (channel-first).
@@ -269,36 +199,6 @@ class VSSMBlock_Mamba3_MIMO(nn.Module):
         return x.to(device=device, dtype=dtype)
 
 
-class VMambaBlock2Way(nn.Module):
-    def __init__(self, *args, **kwargs):
-        super().__init__()
-
-        if len(args) >= 4:
-            print(args)
-            input_chanels, d_state, expand, d_conv = args[0], args[1], args[2], args[3]
-        else: 
-            raise Exception("Wrong arg count")
-
-        if not hasattr(self, 'mamba'):
-            self.mamba = VMamba2DBlock(
-                dim=input_chanels,  # Use actual input channels
-                d_state=d_state,
-                expand=expand,
-                d_conv=d_conv,
-                two_way_scan=True
-            )
-
-    
-    def forward(self, x):
-        self.mamba.to(x.device)
-        x_out = self.mamba(x)
-        
-        return x_out
-
-
-
-
-
 
 
 # Register custom modules with ultralytics
@@ -309,26 +209,16 @@ def mamba_parse_model(d, ch, verbose=True):
     import sys
     
     original_globals = sys.modules['ultralytics.nn.tasks'].__dict__
-    original_globals['MambaBlock'] = MambaBlock
-    original_globals['VMambaBlock'] = VMambaBlock
-    original_globals['VMambaBlock2Way'] = VMambaBlock2Way
     original_globals['VSSMBlock'] = VSSMBlock
     original_globals['VSSMBlock_Mamba2'] = VSSMBlock_Mamba2
     original_globals['VSSMBlock_Mamba3'] = VSSMBlock_Mamba3
     original_globals['VSSMBlock_Mamba3_MIMO'] = VSSMBlock_Mamba3_MIMO
     
-    try:
-        return _original_parse_model(d, ch, verbose)
-    finally:
-        if 'MambaBlock' in original_globals:
-            del original_globals['MambaBlock']
+    return _original_parse_model(d, ch, verbose)
 
 import ultralytics.nn.tasks as tasks
 tasks.parse_model = mamba_parse_model
 modules.parse_model = mamba_parse_model
-modules.MambaBlock = MambaBlock
-modules.VMambaBlock = VMambaBlock
-modules.VMambaBlock2Way = VMambaBlock2Way
 modules.VSSMBlock = VSSMBlock
 modules.VSSMBlock_Mamba2 = VSSMBlock_Mamba2
 modules.VSSMBlock_Mamba3 = VSSMBlock_Mamba3

@@ -1,5 +1,4 @@
 # yolo26-v-mamba3-attention.yaml
-# VSSMBlock_Mamba3 used only as attention after SPPF (replacing C2PSA), standard C3k2 head
 
 nc: 1
 end2end: True
@@ -18,7 +17,6 @@ backbone:
   - [-1, 1, C3k2, [256, True]]              # 8
   - [-1, 1, SPPF, [256, 5, 3, True]]        # 9
   # VSSMBlock_Mamba2 args: [dim, d_state, ssm_ratio, d_conv, headdim, chunk_size, ngroups]
-  # d_inner=512, headdim=64 → 8 heads
   - [-1, 1, VSSMBlock_Mamba2, [256, 128, 2.0, 3, 64, 256, 1]]  # 10
 
 head:
