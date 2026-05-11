@@ -1,10 +1,9 @@
 # train.py
 import mamba_registry  # This registers everything
 from ultralytics import YOLO, RTDETR
-from gpu_monitor import GPUMonitor
 import torch
 
-MODEL_NAME = "yolo26-v-mamba3"
+MODEL_NAME = "yolo26-v-mamba3-mimo"
 DATA = "merged3v"
 
 PRETRAINED_MODELS = [
@@ -33,9 +32,6 @@ if __name__ == '__main__':
     # benchmark()
     # benchmark_all()
     # monitor()
-
-    MODEL_NAME = "yolo26-v-mamba3"
-    DATA = "merged3v"
 
     model = YOLO(f"model-cfg/{MODEL_NAME}.yaml")
     # model = YOLO(f"{MODEL_NAME}.yaml").load(f"./pretrained/{MODEL_NAME}/weights/best.pt")
