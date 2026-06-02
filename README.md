@@ -10,7 +10,7 @@ Experiments for drone detection with YOLO26, VMamba, and Mamba-based variants.
 ## Dependancies
 
 - [mamba_ssm](https://github.com/state-spaces/mamba)
-- Ultralytics and its dependancies. The modified version available inside libs/ and should be installed as `pip install -e .`
+- Ultralytics and its dependancies. The modified version of Ultralytics 8.4.14 available inside libs/ and should be installed as `pip install -e .`
 
 ## Notes
 
